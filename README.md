@@ -1,4 +1,5 @@
 # 🔐 BB84 Hybrid Quantum-Classical Encryption System
+Developed in association with **[NeureonMindFlux Research Lab](https://github.com/Neureonmindflux-Research-Lab)**
 
 This project implements a complete quantum-classical encryption framework based on the BB84 protocol for secure key distribution, combined with AES-256 symmetric encryption, HMAC validation, and optional post-quantum authentication using Dilithium2.
 

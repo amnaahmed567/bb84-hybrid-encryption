@@ -14,10 +14,11 @@ import secrets
 
 # Optional: Post-quantum authentication (fallback if not available)
 try:
-    from pqcrypto.sign.dilithium2 import generate_keypair, sign, verify
+    from dilithium import Dilithium, parameter_sets
     PQCRYPTO_AVAILABLE = True
 except ImportError:
     PQCRYPTO_AVAILABLE = False
+
 
 def generate_random_bits(length: int) -> List[int]:
     """
@@ -81,9 +82,11 @@ def bb84_protocol(length: int = 128, authenticate: bool = False) -> Tuple[List[i
 
     if authenticate and PQCRYPTO_AVAILABLE:
         public_data = "".join(alice_bases).encode("utf-8")
-        pk, sk = generate_keypair()
-        signature = sign(public_data, sk)
-        if not verify(public_data, signature, pk):
+        dil = Dilithium(parameter_set=parameter_sets["Dilithium5"])
+        pk, sk = dil.generate_keypair()
+        signature = dil.sign(public_data, sk)
+        if not dil.verify(public_data, signature, pk):
             raise ValueError("Post-quantum signature verification failed.")
+
 
     return key_alice, key_bob, matching_indices

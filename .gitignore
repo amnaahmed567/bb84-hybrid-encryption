@@ -1,18 +1,35 @@
-.gradle/
+# --- Python bytecode / cache ---
+__pycache__/
+*.py[cod]
+*$py.class
+
+# --- Virtual environments ---
+venv/
+.venv/
+env/
+.env/
+
+# --- Build / distribution files ---
 build/
+dist/
+*.egg-info/
+*.egg
+
+# --- IDE / Editor settings ---
+.vscode/
 .idea/
-*.iml
+*.swp
+*.swo
+
+# --- Test results and temporary files ---
+BB84_Test_Results/
 *.log
-*.lock
-*.apk
-*.dex
-*.class
-*.so
-*.jar
-*.jks
-*.keystore
-*.zip
-*.mp4
-*.ogg
-android/app/debug/
-android/app/release/
+*.tmp
+
+# --- OS-specific files ---
+.DS_Store
+Thumbs.db
+
+# --- Optional (if used) ---
+*.sqlite3
+*.db

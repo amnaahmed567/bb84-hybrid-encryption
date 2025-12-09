@@ -1,6 +1,6 @@
 # key_utils.py
 # Utilities for BB84 quantum key post-processing and AES-256 derivation.
-# Includes entropy validation, conversion, and HMAC integrity check.
+# Includes entropy validation, conversion, and key derivation helpers (AEAD used for authentication).
 # ----------------------------------------------------------------------------
 # Copyright 2025 Hector Mozo
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -9,9 +9,12 @@
 
 
 from typing import List
-from hashlib import pbkdf2_hmac
-import hmac
 import os
+
+# Use HKDF from the cryptography library for key derivation
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.backends import default_backend
 
 def check_key_entropy(bits: List[int]) -> bool:
     """
@@ -56,33 +59,101 @@ def bytes_to_bits(data: bytes) -> List[int]:
 
 def derive_aes_key_from_bits(bits: List[int], salt: bytes = None, iterations: int = 100_000) -> bytes:
     """
-    Derives a secure 256-bit AES key from quantum-generated bits using PBKDF2-HMAC-SHA256.
-    Produces a 48-byte output: 32-byte key + 16-byte salt.
+    Derives a secure 256-bit AES key from quantum-generated bits using HKDF-SHA256.
+    The function preserves the previous API by returning 48 bytes: 32-byte key + 16-byte salt.
+
+    Notes:
+    - The `iterations` parameter is retained for API compatibility but is ignored for HKDF.
+    - HKDF provides a robust KDF; callers should treat the returned salt as the salt
+      that must be reused during key reconstruction.
 
     Args:
         bits: BB84 shared bits
         salt: Optional fixed salt (for verification); auto-generated if None
-        iterations: PBKDF2 iteration count
+        iterations: Ignored (kept for backward compatibility)
 
     Returns:
-        Key + salt as bytes
+        Concatenated `key (32 bytes) || salt (16 bytes)` as bytes
     """
     raw = bits_to_bytes(bits)
     salt = salt or os.urandom(16)
-    key = pbkdf2_hmac('sha256', raw, salt, iterations, dklen=32)
+
+    hkdf = HKDF(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=salt,
+        info=b"bb84-aes-key-derivation",
+        backend=default_backend(),
+    )
+
+    key = hkdf.derive(raw)
     return key + salt
 
-def verify_key_integrity(key_with_salt: bytes, bits: List[int], iterations: int = 100_000) -> bool:
-    """
-    Verifies that the provided key was derived from the given bits and salt.
 
+def derive_separated_keys(bits: List[int], salt: bytes = None) -> dict:
+    """
+    Derives multiple separated keys from quantum bits using HKDF with different info parameters.
+    This implements key separation to prevent key reuse attacks.
+    
+    Each key is derived independently using HKDF with a unique 'info' parameter,
+    ensuring cryptographic separation between different use cases.
+    
     Args:
-        key_with_salt: Original key+salt (48 bytes)
-        bits: BB84 shared bits for recomputation
-
+        bits: BB84 shared bits
+        salt: Optional fixed salt; auto-generated if None
+    
     Returns:
-        True if HMAC matches; False otherwise
+        Dictionary containing:
+        - 'encryption_key': 32-byte key for AES encryption
+        - 'auth_key': 32-byte key for authentication (if needed separately)
+        - 'signature_key': 32-byte key for signatures (if needed)
+        - 'salt': 16-byte salt used for all derivations
+    
+    Security Note:
+        Using different 'info' parameters ensures that even if one key is compromised,
+        the others remain secure due to the one-way property of HKDF.
     """
-    salt = key_with_salt[32:]
-    expected_key = pbkdf2_hmac('sha256', bits_to_bytes(bits), salt, iterations, dklen=32)
-    return hmac.compare_digest(key_with_salt[:32], expected_key)
+    raw = bits_to_bytes(bits)
+    salt = salt or os.urandom(16)
+    
+    # Derive encryption key
+    hkdf_enc = HKDF(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=salt,
+        info=b"bb84-aes-encryption-key",
+        backend=default_backend(),
+    )
+    encryption_key = hkdf_enc.derive(raw)
+    
+    # Derive authentication key (for future HMAC if needed separately from AEAD)
+    hkdf_auth = HKDF(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=salt,
+        info=b"bb84-authentication-key",
+        backend=default_backend(),
+    )
+    auth_key = hkdf_auth.derive(raw)
+    
+    # Derive signature key (for internal signing operations if needed)
+    hkdf_sig = HKDF(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=salt,
+        info=b"bb84-signature-key",
+        backend=default_backend(),
+    )
+    signature_key = hkdf_sig.derive(raw)
+    
+    return {
+        'encryption_key': encryption_key,
+        'auth_key': auth_key,
+        'signature_key': signature_key,
+        'salt': salt
+    }
+
+
+# Note: AES-GCM AEAD provides built-in authentication, so separate auth_key
+# is primarily for future extensibility or additional MAC layers.
+# The key separation pattern above prevents key reuse attacks.

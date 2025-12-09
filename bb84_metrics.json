@@ -1,8 +1,8 @@
 {
-  "Timestamp": "2025-06-15 15:16:53.208480",
-  "Decryption Time (s)": 0.089,
-  "HMAC Integrity Check": "Passed",
-  "SHA-256 Hash of Encrypted File": "4eff36c443070508133d76b2b02e97e28b1fe2754249b79c47cfc6721b870849",
-  "Decrypted File Size (bytes)": 117524,
-  "SHA-256 Hash of Decrypted File": "21ab8a8d008bf9938a1278eb15e12905fefbe43e1dc18773bda2b5e2a647c963"
+  "Timestamp": "2025-12-09 18:22:24.674471",
+  "Decryption Time (s)": 0.058,
+  "AEAD Authentication": "Passed",
+  "SHA-256 Hash of Encrypted File": "e50d531718fe543931f2bf2f41e39de76c80411fdb4b0c002ff8e93dbeb63d7e",
+  "Decrypted File Size (bytes)": 1470,
+  "SHA-256 Hash of Decrypted File": "f594a742b3ff843bce6f3ffe86c568c47a7439a50f480498d2bf201d0b62c024"
 }

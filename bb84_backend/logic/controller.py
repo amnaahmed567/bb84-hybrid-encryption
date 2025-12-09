@@ -19,10 +19,11 @@ import json
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 # Import core cryptographic modules
-from core.bb84_quantum import bb84_protocol
-from core.key_utils import derive_aes_key_from_bits, verify_key_integrity
+from core.bb84_quantum import bb84_protocol, sample_key_confirmation
+from core.key_utils import derive_aes_key_from_bits
 from core.encryption import encrypt_file_local as core_encrypt_file_local
 from secure_io.secure_packager import save_encrypted_file, load_and_decrypt_bytes
+from cryptography.exceptions import InvalidTag
 
 # Metrics collector for BB84 encryption/decryption process
 class BB84MetricsCollector:
@@ -82,8 +83,14 @@ class BB84MetricsCollector:
         self.metrics["SHA-256 Hash of Decrypted File"] = hashlib.sha256(decrypted_bytes).hexdigest()
 
     # Register result of HMAC integrity check
-    def add_hmac_verification(self, valid):
-        self.metrics["HMAC Integrity Check"] = "Passed" if valid else "Failed"
+    def add_aead_authentication(self, valid):
+        # Record result of AEAD authentication (AES-GCM)
+        self.metrics["AEAD Authentication"] = "Passed" if valid else "Failed"
+    
+    # Record key confirmation (sacrifice/sample) result
+    def add_key_confirmation(self, passed: bool, error_rate: float):
+        self.metrics["Key Confirmation"] = "Passed" if passed else "Failed"
+        self.metrics["Key Confirmation Error Rate"] = round(error_rate, 4)
 
     # Log whether post-quantum signature was used
     def add_quantum_signature_status(self, enabled: bool):
@@ -102,18 +109,35 @@ def encrypt_file_local(data: bytes, filename: str) -> Tuple[str, str]:
     metrics.start_timer()
     metrics.add_timestamp()
     metrics.add_file_size_before_encryption(data)
-
+    
     # Generate BB84 quantum key and optional post-quantum signature
     key_a_bits, key_b_bits, signature = bb84_protocol(length=256, authenticate=True)
-
+    
+    # Perform BB84 key confirmation (sacrifice/sample check)
+    passed, error_rate, key_a_bits_remain, key_b_bits_remain, sampled = sample_key_confirmation(
+        key_a_bits, key_b_bits, sample_size=20, threshold=0.15
+    )
+    
+    # Record key confirmation result
+    metrics.add_key_confirmation(passed, error_rate)
+    
+    if not passed:
+        # Abort encryption due to high error rate (possible eavesdropping)
+        metrics.stop_timer("Encryption Time (s)")
+        metrics.export_to_json("bb84_metrics.json")
+        return "", f"ERROR: High error rate detected ({error_rate:.2%}). Possible eavesdropping. Encryption aborted."
+    
+    # Use remaining keys after sample check
+    key_a_bits = key_a_bits_remain
+    key_b_bits = key_b_bits_remain
+    
     # Package and encrypt the data using AES-256 derived from BB84 key
     package_bytes = save_encrypted_file(
         plaintext=data,
         key_a_bits=key_a_bits,
-        key_b_bits=key_b_bits,
         original_filename=filename
     )
-
+    
     # Record encryption performance and key stats
     metrics.stop_timer("Encryption Time (s)")
     metrics.add_key_metrics(key_a_bits, key_b_bits)
@@ -121,39 +145,44 @@ def encrypt_file_local(data: bytes, filename: str) -> Tuple[str, str]:
     metrics.add_sha256_hash(package_bytes)
     metrics.add_quantum_signature_status(signature is not None)
     metrics.export_to_json("bb84_metrics.json")
-
+    
     # Convert encrypted output to Base64 and format Key B as string
     encrypted_b64 = base64.b64encode(package_bytes).decode("utf-8")
     key_b_str = "".join(map(str, key_b_bits))
     return encrypted_b64, key_b_str
 
-# DECRYPTION LOGIC (includes validation and full metrics logging)
+# DECRYPTION LOGIC (includes full metrics logging)
 def decrypt_file_local(data_base64: str, key_b_bits: List[int]) -> Tuple[Optional[bytes], Optional[dict]]:
+    # Initialize metrics
+    metrics = BB84MetricsCollector()
+    metrics.start_timer()
+    metrics.add_timestamp()
+
+    # Decode Base64 and attempt decryption using Key B
+    encrypted_bytes = base64.b64decode(data_base64)
+    
     try:
-        # Initialize metrics
-        metrics = BB84MetricsCollector()
-        metrics.start_timer()
-        metrics.add_timestamp()
-
-        # Decode Base64 and attempt decryption using Key B
-        encrypted_bytes = base64.b64decode(data_base64)
         data, metadata, integrity_ok = load_and_decrypt_bytes(encrypted_bytes, key_b_bits)
-
-        # Log decryption time and integrity verification status
+    except InvalidTag:
+        # Authentication failed — record AEAD failure and return clear message
         metrics.stop_timer("Decryption Time (s)")
-        metrics.add_hmac_verification(integrity_ok)
+        metrics.add_aead_authentication(False)
         metrics.add_sha256_hash(encrypted_bytes)
-
-        if data:
-            metrics.add_decrypted_file_size(data)
-            metrics.add_sha256_of_decrypted(data)
-
         metrics.export_to_json("bb84_metrics.json")
+        return None, {"error": "Authentication failed: ciphertext/tag mismatch (possible wrong Key B or tampered file)."}
 
-        if not integrity_ok:
-            return None, {"error": "Key B does not match the original quantum key. Integrity verification failed."}
+    # Log decryption time and integrity (AEAD) verification status
+    metrics.stop_timer("Decryption Time (s)")
+    metrics.add_aead_authentication(integrity_ok)
+    metrics.add_sha256_hash(encrypted_bytes)
 
-        return data, metadata
-    except Exception as e:
-        # Generic error handling and logging
-        return None, {"error": str(e)}
+    if data:
+        metrics.add_decrypted_file_size(data)
+        metrics.add_sha256_of_decrypted(data)
+
+    metrics.export_to_json("bb84_metrics.json")
+
+    if not integrity_ok:
+        return None, {"error": "Key B does not match the original quantum key. Integrity verification failed."}
+
+    return data, metadata

@@ -12,6 +12,9 @@ from qiskit_aer import AerSimulator
 from typing import List, Tuple
 import secrets
 
+# Use a cryptographically secure RNG for sampling operations
+secure_random = secrets.SystemRandom()
+
 # Optional: Post-quantum authentication (fallback if not available)
 try:
     from dilithium import Dilithium, parameter_sets
@@ -90,3 +93,46 @@ def bb84_protocol(length: int = 128, authenticate: bool = False) -> Tuple[List[i
 
 
     return key_alice, key_bob, matching_indices
+
+
+def sample_key_confirmation(key_a: List[int], key_b: List[int], sample_size: int = 20, threshold: float = 0.15):
+    """
+    Performs a sacrifice/sample check on a subset of the sifted key bits.
+
+    - Randomly selects up to `sample_size` indices from the sifted key.
+    - Compares Alice and Bob bits at those indices to estimate the error rate.
+    - If the error rate exceeds `threshold`, the function indicates failure (possible eavesdropping).
+    - On success, returns the remaining key bits (with sampled bits removed) for both parties.
+
+    Args:
+        key_a: Alice's sifted key bits (list of 0/1)
+        key_b: Bob's sifted key bits (list of 0/1)
+        sample_size: Number of bits to sacrifice for the test (default 20)
+        threshold: Maximum tolerated error rate (fraction, default 0.15)
+
+    Returns:
+        (passed: bool, error_rate: float, remaining_a: List[int], remaining_b: List[int], sampled_indices: List[int])
+    """
+    n = min(sample_size, len(key_a))
+    if n == 0:
+        return True, 0.0, key_a, key_b, []
+
+    # Choose sample indices deterministically from secure randomness
+    sampled_indices = secure_random.sample(range(len(key_a)), k=n)
+
+    # Compare bits at sampled indices
+    mismatches = 0
+    for i in sampled_indices:
+        if key_a[i] != key_b[i]:
+            mismatches += 1
+
+    error_rate = mismatches / n
+
+    passed = error_rate <= threshold
+
+    # Build remaining keys by omitting sampled indices
+    sampled_set = set(sampled_indices)
+    remaining_a = [bit for idx, bit in enumerate(key_a) if idx not in sampled_set]
+    remaining_b = [bit for idx, bit in enumerate(key_b) if idx not in sampled_set]
+
+    return passed, error_rate, remaining_a, remaining_b, sampled_indices

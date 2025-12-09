@@ -1,5 +1,5 @@
 # secure_packager.py
-# Secure packaging and unpackaging of encrypted files with BB84, AES + HMAC, and post-quantum signature validation
+# Secure packaging and unpackaging of encrypted files with BB84, AES-GCM (AEAD), and post-quantum signature validation
 # ----------------------------------------------------------------------------
 # Copyright 2025 Hector Mozo
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -9,13 +9,12 @@ import json
 import base64
 from typing import List, Tuple, Dict
 import os
+from cryptography.exceptions import InvalidTag
 
 # Core AES encryption and key utilities
 from bb84_backend.core.aes_engine import aes_encrypt, aes_decrypt
 from bb84_backend.core.key_utils import (
     derive_aes_key_from_bits,
-    verify_key_integrity,
-    bits_to_bytes
 )
 
 # ----------------------------------------------------------------------------
@@ -52,7 +51,6 @@ def _dilithium_keypair_pk_sk(dil) -> Tuple[bytes, bytes]:
 def save_encrypted_file(
     plaintext: bytes,
     key_a_bits: List[int],
-    key_b_bits: List[int],
     original_filename: str = "file"
 ) -> bytes:
     """
@@ -64,22 +62,38 @@ def save_encrypted_file(
     key_with_salt = derive_aes_key_from_bits(key_a_bits)
 
     # 2) Build the INTERNAL payload (this will be encrypted)
+    # INTERNAL payload only contains the encrypted file and minimal metadata.
+    # Do NOT store raw Key A bits here — that would allow anyone with the
+    # package to reconstruct the AES key. Key A must remain secret with Alice.
+    # Note: We place `original_filename` in the OUTER package so it can be
+    # included in AAD (authenticated but not encrypted). The INTERNAL payload
+    # therefore omits filename to avoid duplication.
     internal_payload = {
         "file_bytes_b64": base64.b64encode(plaintext).decode("utf-8"),
-        "key_a_encoded": base64.b64encode(bits_to_bytes(key_a_bits)).decode("utf-8"),
-        # Optional: hide sensitive metadata inside as well
-        "original_filename": original_filename,
         # "extension": "bin",  # add if you track it elsewhere
     }
     internal_bytes = json.dumps(internal_payload).encode("utf-8")
 
     # 3) Encrypt the entire INTERNAL payload
-    encrypted = aes_encrypt(internal_bytes, key_with_salt)
+    # Use a package version string as AAD so outer-package version field
+    # is bound into the authentication tag.
+    version = "AES-GCM-v1"
+    # 3.5) Build AAD from version, original filename and salt so it is
+    # authenticated by AES-GCM but not encrypted. We expose `original_filename`
+    # in the OUTER package (authenticated via signature and GCM AAD).
+    salt_b64 = base64.b64encode(key_with_salt[32:]).decode("utf-8")
+    aad_obj = {"version": version, "original_filename": original_filename, "salt": salt_b64}
+    aad_bytes = json.dumps(aad_obj, sort_keys=True).encode("utf-8")
 
-    # 4) OUTER package (NO sensitive fields exposed here)
+    # 4) Encrypt with AAD (binds metadata into the authentication tag)
+    encrypted = aes_encrypt(internal_bytes, key_with_salt, aad=aad_bytes)
+
+    # 5) OUTER package (NO sensitive fields exposed here except authenticated metadata)
     package = {
         "ciphertext": base64.b64encode(encrypted).decode("utf-8"),
-        "salt": base64.b64encode(key_with_salt[32:]).decode("utf-8"),  # last 16 bytes are salt
+        "salt": salt_b64,
+        "version": version,
+        "original_filename": original_filename,
         # <-- no key_a_encoded here anymore
     }
 
@@ -110,6 +124,9 @@ def load_and_decrypt_bytes(
     """
     Loads encrypted package and decrypts using derived key if valid.
     Validates post-quantum signature and key integrity before decrypting.
+    
+    Security Optimization: Verifies post-quantum signature BEFORE attempting decryption
+    to prevent wasted computation on tampered packages.
 
     Returns:
         - Decrypted plaintext bytes
@@ -119,6 +136,7 @@ def load_and_decrypt_bytes(
     # Parse OUTER package
     package = json.loads(package_bytes.decode("utf-8"))
 
+    # ===== OPTIMIZATION: Verify signature FIRST (before expensive decryption) =====
     # 1) Verify post-quantum signature (if included)
     if PQCRYPTO_AVAILABLE and "pq_signature" in package and "pq_public_key" in package:
         pq_signature = base64.b64decode(package["pq_signature"])
@@ -131,49 +149,50 @@ def load_and_decrypt_bytes(
         try:
             # This build's verify order: verify(pk_bytes, message, sig_bytes)
             if not dilithium_obj.verify(pq_public_key, unsigned_bytes, pq_signature):
+                # Signature invalid - reject immediately WITHOUT attempting decryption
                 return b"", {}, False
         except Exception:
+            # Signature verification failed - reject immediately
             return b"", {}, False
     else:
-        # PQC available but no signature included -> invalid
+        # PQC available but no signature included -> invalid (reject before decryption)
         return b"", {}, False
 
     # 2) Extract OUTER encrypted components
     salt = base64.b64decode(package["salt"])
     ciphertext = base64.b64decode(package["ciphertext"])
+    version = package.get("version", "")
+    original_filename = package.get("original_filename", "decrypted_file")
 
     # 3) Derive AES key using Bob’s bits and the stored salt
     candidate_key = derive_aes_key_from_bits(key_b_bits, salt)
 
-    # 4) Decrypt the INTERNAL payload
-    internal_bytes = aes_decrypt(ciphertext, candidate_key)
+    # 4) Rebuild AAD the same way it was constructed during encryption
+    aad_obj = {"version": version, "original_filename": original_filename, "salt": package["salt"]}
+    aad_bytes = json.dumps(aad_obj, sort_keys=True).encode("utf-8")
 
-    # 5) Parse INTERNAL payload (contains original file and protected fields)
+    # 5) Decrypt the INTERNAL payload (pass AAD)
+    # aes_decrypt will raise InvalidTag if authentication fails
+    # This is now safe because we already verified the signature above
+    internal_bytes = aes_decrypt(ciphertext, candidate_key, aad=aad_bytes)
+
+    # 6) Parse INTERNAL payload (contains original file and protected fields)
     try:
         internal = json.loads(internal_bytes.decode("utf-8"))
     except Exception:
         return b"", {}, False
 
-    # 6) Rehydrate original content and protected `key_a_encoded`
+    # 6) Rehydrate original content
     try:
         plaintext = base64.b64decode(internal["file_bytes_b64"])
-        key_a_encoded_b64 = internal["key_a_encoded"]
     except KeyError:
         return b"", {}, False
 
-    # 7) Reconstruct stored Key A bits from INTERNAL payload (for integrity check)
-    encoded_key_a = base64.b64decode(key_a_encoded_b64)
-    stored_key_a_bits = [int(bit) for byte in encoded_key_a for bit in f"{byte:08b}"]
-
-    # 8) Integrity check using HMAC (candidate_key vs stored Key A bits)
-    integrity_ok = verify_key_integrity(candidate_key, stored_key_a_bits)
-    if not integrity_ok:
-        return b"", {}, False
-
-    # 9) Metadata (extracted from INTERNAL payload if stored)
+    # 7) Metadata (extracted from INTERNAL payload if stored)
     metadata = {
         "original_filename": internal.get("original_filename", "decrypted_file"),
         "extension": internal.get("extension", "bin"),
     }
 
+    # Success: signature verified first, then AEAD authentication passed
     return plaintext, metadata, True

@@ -1,7 +1,7 @@
 # 🔐 BB84 Hybrid Quantum-Classical Encryption System
 Developed in association with **[NeureonMindFlux Research Lab](https://github.com/Neureonmindflux-Research-Lab)**
 
-This project implements a complete quantum-classical encryption framework based on the BB84 protocol for secure key distribution, combined with AES-256 symmetric encryption, HMAC validation, and optional post-quantum authentication using Dilithium2.
+This project implements a complete quantum-classical encryption framework based on the BB84 protocol for secure key distribution, combined with AES-256-GCM (AEAD) symmetric encryption and optional post-quantum authentication using Dilithium2.
 
 ---
 
@@ -10,7 +10,7 @@ This project implements a complete quantum-classical encryption framework based 
 - 🧬 **Quantum Key Generation via BB84** (simulated with Qiskit AerSimulator)
 - 🔐 **AES-256 encryption** with salted key derivation
 - 🔑 **Key A / Key B split model** for zero-trust decryption
-- ✅ **Integrity validation** via HMAC and key verification
+-- ✅ **Integrity & authentication** via AES‑GCM (AEAD)
 - 🔏 **Optional post-quantum signature** using Dilithium2 (if supported)
 - 📦 **Modular architecture** with clean separation between crypto engine, quantum logic, and GUI
 - 🖥️ **Tkinter GUI** for file selection, key generation, and process visualization
@@ -23,7 +23,7 @@ This project implements a complete quantum-classical encryption framework based 
 bb84_backend/
 ├── core/
 │   ├── bb84_quantum.py        # Simulates BB84 protocol
-│   ├── aes_engine.py          # AES-256 CBC encryption/decryption
+│   ├── aes_engine.py          # AES-256 GCM (AEAD) encryption/decryption
 │   ├── encryption.py          # Core logic for high-level encryption/decryption operations
 │   ├── key_utils.py           # Key derivation, integrity checks
 │   └── __init__.py
@@ -34,7 +34,7 @@ bb84_backend/
 │   ├── controller.py          # Central orchestrator for all modules
 │   └── __init__.py
 ├── secure_io/
-│   ├── secure_packager.py     # File encryption packaging, signature, and HMAC
+│   ├── secure_packager.py     # File encryption packaging, signature, and AEAD authentication
 │   └── __init__.py
 ├── start_gui.py               # Launcher script for GUI (alternative to running gui/bb84_gui.py)
 ├── requirements.txt
@@ -78,7 +78,8 @@ from secure_io.file_io import save_encrypted_file
 with open("secret.txt", "rb") as f:
     data = f.read()
 
-package_bytes = save_encrypted_file(data, key_a, key_b, original_filename="secret.txt")
+# New API: pass `key_a` (Alice's bits) only. Key B is not stored in the package.
+package_bytes = save_encrypted_file(data, key_a, original_filename="secret.txt")
 
 with open("encrypted_output.bb84", "wb") as out:
     out.write(package_bytes)

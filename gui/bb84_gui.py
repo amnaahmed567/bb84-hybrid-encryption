@@ -1,8 +1,10 @@
 # python start_gui.py
+# cd "c:\Users\Qadri laptop\Downloads\New folder (2)\BB84-Quantum-Encryption-Tool-Simulator" ; python start_gui.py 
+# python auto_generate_summary.py
 import sys
 import os
 import tkinter as tk
-from tkinter import filedialog, messagebox
+from tkinter import filedialog, messagebox, ttk
 from tkinter.scrolledtext import ScrolledText
 import base64
 import re
@@ -32,8 +34,11 @@ class BB84App:
 
         # Internal state
         self.file_path = None
+        self.file_name_without_ext = None  # Store filename without extension
         self.encrypted_data = None
         self.key_b = None
+        self.operation_type = None  # Track "encrypt" or "decrypt" for report naming
+        self.cipher_used = None  # Track cipher used for key/report naming
 
         # Build GUI components
         self.create_widgets()
@@ -54,6 +59,34 @@ class BB84App:
         tk.Button(self.root, text="Select File", command=self.select_file, bg="#d0eaff").pack(pady=5)
         self.file_label = tk.Label(self.root, text="No file selected", bg="#f4f4f4")
         self.file_label.pack(pady=2)
+
+        # Cipher selection (AES-GCM or ChaCha20) - only shown in encryption mode
+        self.cipher_frame = tk.Frame(self.root, bg="#f4f4f4")
+        cipher_label = tk.Label(self.cipher_frame, text="Encryption Algorithm:", bg="#f4f4f4", font=("Arial", 10))
+        cipher_label.pack(side=tk.LEFT, padx=5)
+        
+        self.cipher_choice = ttk.Combobox(
+            self.cipher_frame,
+            values=[
+                "AES-GCM (Best for Desktop/Server with AES-NI)",
+                "ChaCha20 (Best for Mobile/ARM/Embedded)"
+            ],
+            state="readonly",
+            width=50
+        )
+        self.cipher_choice.current(0)  # Default to AES-GCM
+        self.cipher_choice.pack(side=tk.LEFT, padx=5)
+        
+        # Add info button for cipher selection
+        info_button = tk.Button(
+            self.cipher_frame, 
+            text="ℹ️", 
+            command=self.show_cipher_info,
+            bg="#e0e0e0",
+            width=3
+        )
+        info_button.pack(side=tk.LEFT, padx=2)
+        self.cipher_frame.pack(pady=5)
 
         # Entry field for Key B (only used in decryption mode)
         self.key_frame = tk.Frame(self.root, bg="#f4f4f4")
@@ -93,16 +126,47 @@ class BB84App:
     def update_mode(self):
         # Update GUI layout based on selected operation mode
         if self.mode_var.get() == "encrypt":
+            self.cipher_frame.pack(pady=5)
             self.key_frame.pack_forget()
             self.copy_button.pack_forget()
             self.save_key_button.pack_forget()
         else:
+            self.cipher_frame.pack_forget()
             self.key_frame.pack(pady=5)
             self.copy_button.pack_forget()
             self.save_key_button.pack_forget()
 
-    def simulate_quantum_process(self):
+    def show_cipher_info(self):
+        """Show information about cipher selection"""
+        info_text = """🔐 Cipher Selection Guide:
+
+AES-GCM (AES-256-GCM):
+✅ Best for: Desktop/Server with modern CPUs
+✅ Hardware: Intel/AMD with AES-NI instruction set
+✅ Speed: 4-10x faster with hardware acceleration
+✅ Standard: NIST approved, most widely used
+✅ Use when: Running on x86/x64 systems
+
+ChaCha20 (ChaCha20-Poly1305):
+✅ Best for: Mobile/ARM/Embedded devices
+✅ Hardware: No special instructions needed
+✅ Speed: 5-15x faster than AES on ARM
+✅ Standard: IETF RFC 8439, used in TLS 1.3
+✅ Use when: Running on ARM, mobile, or older CPUs
+
+Both provide:
+• 256-bit encryption (quantum-resistant)
+• AEAD authentication (tamper detection)
+• BB84 quantum key distribution
+• Post-quantum Dilithium5 signatures
+
+Security: Both are equivalent ✅"""
+        
+        messagebox.showinfo("Cipher Selection Guide", info_text)
+
+    def simulate_quantum_process(self, cipher="AES-GCM"):
         # Simulate quantum key exchange visually
+        cipher_name = "ChaCha20 key" if "ChaCha20" in cipher else "AES-256 key"
         steps = [
             "Initializing quantum channel...",
             "Alice is generating random bits...",
@@ -111,7 +175,7 @@ class BB84App:
             "Bob measures the qubits...",
             "Alice and Bob compare bases...",
             "Final key is extracted from matching bases.",
-            "Key used to derive AES-256 key...",
+            f"Key used to derive {cipher_name}...",
             "Encryption process complete."
         ]
         for step in steps:
@@ -125,7 +189,10 @@ class BB84App:
         path = filedialog.askopenfilename()
         if path:
             self.file_path = path
-            self.file_label.config(text=os.path.basename(path))
+            base_name = os.path.basename(path)
+            # Extract filename without extension for auto-naming
+            self.file_name_without_ext = os.path.splitext(base_name)[0]
+            self.file_label.config(text=f"Selected: {base_name}")
 
     def import_key_file(self):
         # Allow user to import Key B from a text file
@@ -143,9 +210,21 @@ class BB84App:
             messagebox.showinfo("Copied", "Key B has been copied to clipboard.")
 
     def save_key_b_to_file(self):
-        # Save Key B as a .txt file
+        # Save Key B as a .txt file with auto-naming including cipher type
         if self.key_b:
-            path = filedialog.asksaveasfilename(defaultextension=".txt", filetypes=[("Text Files", "*.txt")])
+            # Auto-generate filename based on selected file and cipher
+            if self.file_name_without_ext and self.cipher_used:
+                default_name = f"{self.file_name_without_ext}_{self.cipher_used}_key.txt"
+            elif self.file_name_without_ext:
+                default_name = f"{self.file_name_without_ext}_key.txt"
+            else:
+                default_name = "key_b.txt"
+            
+            path = filedialog.asksaveasfilename(
+                defaultextension=".txt",
+                initialfile=default_name,
+                filetypes=[("Text Files", "*.txt")]
+            )
             if path:
                 with open(path, "w") as f:
                     f.write(self.key_b)
@@ -164,19 +243,53 @@ class BB84App:
     def process_file(self):
         # Dispatch based on selected mode
         if self.mode_var.get() == "encrypt":
-            self.simulate_quantum_process()
+            self.operation_type = "encrypt"
+            # Get cipher selection for simulation
+            cipher_selection = self.cipher_choice.get()
+            if "ChaCha20" in cipher_selection:
+                cipher = "ChaCha20"
+            else:
+                cipher = "AES-GCM"
+            self.simulate_quantum_process(cipher)
             self.encrypt()
         else:
+            self.operation_type = "decrypt"
             self.decrypt()
 
     def encrypt(self):
-        # Perform encryption using quantum key and AES
+        # Perform encryption using quantum key and selected cipher
         with open(self.file_path, "rb") as f:
             file_bytes = f.read()
 
-        encrypted_data, key_b = encrypt_file_local(file_bytes, os.path.basename(self.file_path))
+        # Determine selected cipher
+        cipher_selection = self.cipher_choice.get()
+        if "ChaCha20" in cipher_selection:
+            cipher = "ChaCha20"
+            cipher_display = "ChaCha20-Poly1305"
+            cipher_prefix = "CHACHA20"
+        else:
+            cipher = "AES-GCM"
+            cipher_display = "AES-256-GCM"
+            cipher_prefix = "AES-GCM"
 
-        save_path = filedialog.asksaveasfilename(defaultextension=".bb84")
+        # Encrypt with selected cipher
+        encrypted_data, key_b = encrypt_file_local(
+            file_bytes, 
+            os.path.basename(self.file_path),
+            cipher=cipher
+        )
+
+        # Auto-generate filename for encrypted file with cipher type
+        if self.file_name_without_ext:
+            default_encrypted_name = f"{self.file_name_without_ext}_{cipher_prefix}_E.bb84"
+        else:
+            default_encrypted_name = "encrypted.bb84"
+        
+        save_path = filedialog.asksaveasfilename(
+            defaultextension=".bb84",
+            initialfile=default_encrypted_name,
+            filetypes=[("BB84 Files", "*.bb84")]
+        )
         if not save_path:
             return
 
@@ -184,15 +297,21 @@ class BB84App:
             f.write(encrypted_data)
 
         self.key_b = key_b
-        self.output_box.insert(tk.END, f"File successfully encrypted and saved to: {save_path}\n")
-        self.output_box.insert(tk.END, f"\nKey B (required for decryption):\n{key_b}\n")
+        self.cipher_used = cipher_prefix  # Store cipher for key/report naming
+        self.output_box.insert(tk.END, f"✅ File successfully encrypted with {cipher_display}\n")
+        self.output_box.insert(tk.END, f"📁 Saved to: {save_path}\n")
+        self.output_box.insert(tk.END, f"🔐 Cipher: {cipher_display}\n")
+        self.output_box.insert(tk.END, f"🔑 BB84 Quantum Key Distribution: Active\n")
+        self.output_box.insert(tk.END, f"📜 Post-Quantum Signature: Dilithium5\n\n")
+        self.output_box.insert(tk.END, f"Key B (required for decryption):\n{key_b}\n\n")
+        self.output_box.insert(tk.END, "⚠️  IMPORTANT: Save Key B securely! It's needed for decryption.\n")
         self.output_box.insert(tk.END, self.recommendations(key_b))
 
         self.copy_button.pack(pady=2)
         self.save_key_button.pack(pady=2)
 
     def decrypt(self):
-        # Perform decryption using provided Key B
+        # Perform decryption using provided Key B (auto-detects cipher)
         with open(self.file_path, "r") as f:
             encrypted_base64 = f.read()
 
@@ -204,21 +323,43 @@ class BB84App:
 
         key_b_bits = [int(b) for b in key_b_input]
 
-        data, metadata = decrypt_file_local(encrypted_base64, key_b_bits)
+        # Auto-detect cipher from package
+        data, metadata = decrypt_file_local(encrypted_base64, key_b_bits, cipher="auto")
         if data is None:
-            self.output_box.insert(tk.END, f"Decryption failed: {metadata}\n")
+            self.output_box.insert(tk.END, f"❌ Decryption failed: {metadata}\n")
+            self.output_box.insert(tk.END, "\nPossible reasons:\n")
+            self.output_box.insert(tk.END, "• Wrong Key B (doesn't match encryption key)\n")
+            self.output_box.insert(tk.END, "• Tampered or corrupted file\n")
+            self.output_box.insert(tk.END, "• Invalid package format\n")
             return
+
+        # Extract cipher type from encrypted filename
+        encrypted_filename = os.path.basename(self.file_path)
+        if "AES-GCM" in encrypted_filename:
+            self.cipher_used = "AES-GCM"
+        elif "CHACHA20" in encrypted_filename:
+            self.cipher_used = "CHACHA20"
+        else:
+            self.cipher_used = None
 
         filename = metadata.get("original_filename", "decrypted_file")
         ext = metadata.get("extension", "bin")
-        save_path = filedialog.asksaveasfilename(defaultextension=f".{ext}", initialfile=filename)
+        # Auto-generate filename for decrypted file using full encrypted filename
+        encrypted_name_without_ext = os.path.splitext(encrypted_filename)[0]
+        default_decrypted_name = f"{encrypted_name_without_ext}_decrypted.{ext}"
+        save_path = filedialog.asksaveasfilename(defaultextension=f".{ext}", initialfile=default_decrypted_name)
         if not save_path:
             return
 
         with open(save_path, "wb") as f:
             f.write(data)
 
-        self.output_box.insert(tk.END, f"File successfully decrypted and saved to: {save_path}\n")
+        self.output_box.insert(tk.END, f"✅ File successfully decrypted!\n")
+        self.output_box.insert(tk.END, f"📁 Saved to: {save_path}\n")
+        self.output_box.insert(tk.END, f"📄 Original filename: {filename}\n")
+        self.output_box.insert(tk.END, f"🔐 Cipher: Auto-detected from package\n")
+        self.output_box.insert(tk.END, f"✓ AEAD Authentication: Passed\n")
+        self.output_box.insert(tk.END, f"✓ Post-Quantum Signature: Verified\n")
 
     def recommendations(self, key_b):
         # Estimate strength of Key B based on bit balance
@@ -229,7 +370,7 @@ class BB84App:
         return f"\nKey B Strength Estimate: {status} (1s: {ones}, 0s: {zeros})\n"
 
     def download_metrics_pdf(self):
-        # Load JSON metrics and export to PDF report
+        # Load JSON metrics and export to PDF report with auto-naming
         try:
             with open("bb84_metrics.json", "r") as f:
                 metrics = json.load(f)
@@ -251,7 +392,27 @@ class BB84App:
         pdf.add_page()
         pdf.chapter_body(metrics)
 
-        save_path = filedialog.asksaveasfilename(defaultextension=".pdf", filetypes=[("PDF files", "*.pdf")])
+        # Auto-generate filename based on file and operation type
+        if self.operation_type == "decrypt" and self.file_path:
+            # For decryption, use the full encrypted filename
+            encrypted_filename = os.path.basename(self.file_path)
+            encrypted_name_without_ext = os.path.splitext(encrypted_filename)[0]
+            default_report_name = f"{encrypted_name_without_ext}_report_decryption.pdf"
+        elif self.file_name_without_ext and self.operation_type:
+            # For encryption, use file name with cipher
+            cipher_part = f"_{self.cipher_used}" if self.cipher_used else ""
+            if self.operation_type == "encrypt":
+                default_report_name = f"{self.file_name_without_ext}{cipher_part}_report_encryption.pdf"
+            else:
+                default_report_name = f"{self.file_name_without_ext}{cipher_part}_report_decryption.pdf"
+        else:
+            default_report_name = "bb84_metrics_report.pdf"
+
+        save_path = filedialog.asksaveasfilename(
+            defaultextension=".pdf",
+            initialfile=default_report_name,
+            filetypes=[("PDF files", "*.pdf")]
+        )
         if save_path:
             pdf.output(save_path)
             messagebox.showinfo("Saved", f"PDF report saved to: {save_path}")

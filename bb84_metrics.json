@@ -1,8 +1,9 @@
 {
-  "Timestamp": "2025-12-09 18:22:24.674471",
-  "Decryption Time (s)": 0.058,
+  "Timestamp": "2025-12-10 20:46:07.020327",
+  "Cipher Algorithm": "AES-GCM",
+  "Decryption Time (s)": 0.3089,
   "AEAD Authentication": "Passed",
-  "SHA-256 Hash of Encrypted File": "e50d531718fe543931f2bf2f41e39de76c80411fdb4b0c002ff8e93dbeb63d7e",
-  "Decrypted File Size (bytes)": 1470,
-  "SHA-256 Hash of Decrypted File": "f594a742b3ff843bce6f3ffe86c568c47a7439a50f480498d2bf201d0b62c024"
+  "SHA-256 Hash of Encrypted File": "786cbcb6e74cf360fece92545eb5d646d2c37643522db1751d8831d49a1acac5",
+  "Decrypted File Size (bytes)": 3736835,
+  "SHA-256 Hash of Decrypted File": "874f3165663e8f3ee96488a92c58223a3fa0bb76cd3d6d3213b109d199f66cdd"
 }

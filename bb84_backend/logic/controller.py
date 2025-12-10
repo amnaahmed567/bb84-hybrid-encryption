@@ -20,9 +20,10 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 # Import core cryptographic modules
 from core.bb84_quantum import bb84_protocol, sample_key_confirmation
-from core.key_utils import derive_aes_key_from_bits
+from core.key_utils import derive_aes_key_from_bits, derive_chacha20_key_from_bits
 from core.encryption import encrypt_file_local as core_encrypt_file_local
 from secure_io.secure_packager import save_encrypted_file, load_and_decrypt_bytes
+from secure_io.secure_packager_chacha20 import save_encrypted_file_chacha20, load_and_decrypt_bytes_chacha20
 from cryptography.exceptions import InvalidTag
 
 # Metrics collector for BB84 encryption/decryption process
@@ -95,6 +96,10 @@ class BB84MetricsCollector:
     # Log whether post-quantum signature was used
     def add_quantum_signature_status(self, enabled: bool):
         self.metrics["Post-Quantum Signature"] = "Enabled" if enabled else "Disabled"
+    
+    # Record encryption cipher used (AES-GCM or ChaCha20-Poly1305)
+    def add_cipher_type(self, cipher: str):
+        self.metrics["Cipher Algorithm"] = cipher
 
     # Export all collected metrics to a JSON file
     def export_to_json(self, output_path="bb84_metrics.json"):
@@ -103,12 +108,44 @@ class BB84MetricsCollector:
         return output_path
 
 # ENCRYPTION LOGIC (enhanced with full metrics collection)
-def encrypt_file_local(data: bytes, filename: str) -> Tuple[str, str]:
+def encrypt_file_local(data: bytes, filename: str, cipher: str = "AES-GCM") -> Tuple[str, str]:
+    """
+    Encrypts a file using BB84 quantum key distribution and symmetric AEAD encryption.
+    
+    Args:
+        data: Raw file bytes to encrypt
+        filename: Original filename for metadata
+        cipher: Encryption algorithm choice:
+                - "AES-GCM" (default): AES-256-GCM (best on modern CPUs with AES-NI)
+                - "ChaCha20": ChaCha20-Poly1305 (best on ARM/mobile or without AES-NI)
+    
+    Returns:
+        Tuple of:
+        - encrypted_b64 (str): Base64-encoded encrypted package
+        - key_b_str (str): Key B as binary string (to be transmitted to receiver)
+    
+    Security:
+        - BB84 quantum key distribution (256 bits)
+        - Key confirmation via sample (20 bits sacrificed, 15% error threshold)
+        - HKDF-SHA256 key derivation
+        - AEAD encryption (AES-GCM or ChaCha20-Poly1305)
+        - Dilithium5 post-quantum signatures
+        - Metadata authentication (AAD)
+    
+    Example:
+        >>> plaintext = b"Secret document"
+        >>> # Use AES-GCM (default, best on x86/x64 with AES-NI)
+        >>> encrypted, key_b = encrypt_file_local(plaintext, "secret.txt")
+        >>> 
+        >>> # Or use ChaCha20 (best on ARM/mobile)
+        >>> encrypted, key_b = encrypt_file_local(plaintext, "secret.txt", cipher="ChaCha20")
+    """
     # Initialize metrics collection
     metrics = BB84MetricsCollector()
     metrics.start_timer()
     metrics.add_timestamp()
     metrics.add_file_size_before_encryption(data)
+    metrics.add_cipher_type(cipher)
     
     # Generate BB84 quantum key and optional post-quantum signature
     key_a_bits, key_b_bits, signature = bb84_protocol(length=256, authenticate=True)
@@ -131,12 +168,19 @@ def encrypt_file_local(data: bytes, filename: str) -> Tuple[str, str]:
     key_a_bits = key_a_bits_remain
     key_b_bits = key_b_bits_remain
     
-    # Package and encrypt the data using AES-256 derived from BB84 key
-    package_bytes = save_encrypted_file(
-        plaintext=data,
-        key_a_bits=key_a_bits,
-        original_filename=filename
-    )
+    # Package and encrypt the data using selected cipher
+    if cipher.upper() == "CHACHA20":
+        package_bytes = save_encrypted_file_chacha20(
+            plaintext=data,
+            key_a_bits=key_a_bits,
+            original_filename=filename
+        )
+    else:  # Default to AES-GCM
+        package_bytes = save_encrypted_file(
+            plaintext=data,
+            key_a_bits=key_a_bits,
+            original_filename=filename
+        )
     
     # Record encryption performance and key stats
     metrics.stop_timer("Encryption Time (s)")
@@ -152,17 +196,65 @@ def encrypt_file_local(data: bytes, filename: str) -> Tuple[str, str]:
     return encrypted_b64, key_b_str
 
 # DECRYPTION LOGIC (includes full metrics logging)
-def decrypt_file_local(data_base64: str, key_b_bits: List[int]) -> Tuple[Optional[bytes], Optional[dict]]:
+def decrypt_file_local(data_base64: str, key_b_bits: List[int], cipher: str = "auto") -> Tuple[Optional[bytes], Optional[dict]]:
+    """
+    Decrypts a file encrypted with BB84 quantum encryption.
+    
+    Args:
+        data_base64: Base64-encoded encrypted package
+        key_b_bits: Bob's quantum key bits (from BB84 protocol)
+        cipher: Decryption algorithm choice:
+                - "auto" (default): Automatically detect from package version field
+                - "AES-GCM": Force AES-256-GCM decryption
+                - "ChaCha20": Force ChaCha20-Poly1305 decryption
+    
+    Returns:
+        Tuple of:
+        - data (bytes): Decrypted plaintext (None if failed)
+        - metadata (dict): Original filename and error messages (if any)
+    
+    Security Checks:
+        1. Dilithium5 signature verification (verify-before-decrypt optimization)
+        2. AEAD authentication (GCM or Poly1305 tag verification)
+        3. AAD verification (metadata tampering detection)
+        4. Key confirmation (implicit via successful decryption)
+    
+    Example:
+        >>> # Auto-detect cipher from package
+        >>> plaintext, metadata = decrypt_file_local(encrypted, key_b_bits)
+        >>> if plaintext:
+        ...     print(f"Decrypted: {metadata['original_filename']}")
+        ... else:
+        ...     print(f"Failed: {metadata['error']}")
+    """
     # Initialize metrics
     metrics = BB84MetricsCollector()
     metrics.start_timer()
     metrics.add_timestamp()
 
-    # Decode Base64 and attempt decryption using Key B
+    # Decode Base64
     encrypted_bytes = base64.b64decode(data_base64)
     
+    # Auto-detect cipher from package version if not specified
+    if cipher.lower() == "auto":
+        try:
+            package = json.loads(encrypted_bytes.decode("utf-8"))
+            version = package.get("version", "")
+            if "ChaCha20" in version:
+                cipher = "ChaCha20"
+            else:
+                cipher = "AES-GCM"
+        except Exception:
+            cipher = "AES-GCM"  # Default to AES-GCM if detection fails
+    
+    metrics.add_cipher_type(cipher)
+    
+    # Attempt decryption with appropriate cipher
     try:
-        data, metadata, integrity_ok = load_and_decrypt_bytes(encrypted_bytes, key_b_bits)
+        if cipher.upper() == "CHACHA20":
+            data, metadata, integrity_ok = load_and_decrypt_bytes_chacha20(encrypted_bytes, key_b_bits)
+        else:  # AES-GCM
+            data, metadata, integrity_ok = load_and_decrypt_bytes(encrypted_bytes, key_b_bits)
     except InvalidTag:
         # Authentication failed — record AEAD failure and return clear message
         metrics.stop_timer("Decryption Time (s)")

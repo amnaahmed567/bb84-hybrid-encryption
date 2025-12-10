@@ -154,6 +154,45 @@ def derive_separated_keys(bits: List[int], salt: bytes = None) -> dict:
     }
 
 
+def derive_chacha20_key_from_bits(bits: List[int], salt: bytes = None) -> bytes:
+    """
+    Derives a secure 256-bit ChaCha20 key from quantum-generated bits using HKDF-SHA256.
+    This function mirrors derive_aes_key_from_bits() but uses a different info parameter
+    for cryptographic separation between AES and ChaCha20 keys.
+    
+    Args:
+        bits: BB84 shared bits
+        salt: Optional fixed salt (for verification); auto-generated if None
+    
+    Returns:
+        Concatenated `key (32 bytes) || salt (16 bytes)` as bytes (48 bytes total)
+    
+    Security Note:
+        - Uses info="bb84-chacha20-encryption-key" to ensure cryptographic separation
+        - ChaCha20 keys and AES keys are derived independently (no key reuse)
+        - Salt must be transmitted alongside ciphertext for decryption
+    
+    Example:
+        >>> quantum_bits = [1, 0, 1, 1, 0, 0, 1, 0] * 32  # 256 bits
+        >>> key_with_salt = derive_chacha20_key_from_bits(quantum_bits)
+        >>> chacha20_key = key_with_salt[:32]  # 32-byte key
+        >>> salt = key_with_salt[32:]           # 16-byte salt
+    """
+    raw = bits_to_bytes(bits)
+    salt = salt or os.urandom(16)
+    
+    hkdf = HKDF(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=salt,
+        info=b"bb84-chacha20-encryption-key",  # Different from AES to prevent key reuse
+        backend=default_backend(),
+    )
+    
+    key = hkdf.derive(raw)
+    return key + salt
+
+
 # Note: AES-GCM AEAD provides built-in authentication, so separate auth_key
 # is primarily for future extensibility or additional MAC layers.
 # The key separation pattern above prevents key reuse attacks.

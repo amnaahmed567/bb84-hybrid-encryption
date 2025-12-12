@@ -16,7 +16,9 @@ class AutoMetricsExtractor:
             'aes_encrypt': {},
             'aes_decrypt': {},
             'chacha_encrypt': {},
-            'chacha_decrypt': {}
+            'chacha_decrypt': {},
+            'siv_encrypt': {},
+            'siv_decrypt': {}
         }
     
     def extract_text_from_pdf(self, pdf_path):
@@ -69,7 +71,13 @@ class AutoMetricsExtractor:
         """Determine report type from filename and content"""
         filename_lower = filename.lower()
         
-        if 'aes' in filename_lower or 'AES-GCM' in text:
+        # Check AES-SIV FIRST (before generic 'aes' check) since 'aes' is substring of 'aes-siv'
+        if 'siv' in filename_lower or 'AES-SIV' in text:
+            if 'encrypt' in filename_lower and 'decrypt' not in filename_lower:
+                return 'siv_encrypt'
+            elif 'decrypt' in filename_lower:
+                return 'siv_decrypt'
+        elif 'aes' in filename_lower or 'AES-GCM' in text:
             if 'encrypt' in filename_lower and 'decrypt' not in filename_lower:
                 return 'aes_encrypt'
             elif 'decrypt' in filename_lower:
@@ -84,11 +92,15 @@ class AutoMetricsExtractor:
         if 'Encryption Time' in text:
             if 'AES-GCM' in text:
                 return 'aes_encrypt'
+            elif 'AES-SIV' in text:
+                return 'siv_encrypt'
             elif 'ChaCha20' in text:
                 return 'chacha_encrypt'
         elif 'Decryption Time' in text:
             if 'AES-GCM' in text:
                 return 'aes_decrypt'
+            elif 'AES-SIV' in text:
+                return 'siv_decrypt'
             elif 'ChaCha20' in text:
                 return 'chacha_decrypt'
         
@@ -143,18 +155,19 @@ class AutoMetricsExtractor:
         
         aes_enc = self.metrics['aes_encrypt']
         chacha_enc = self.metrics['chacha_encrypt']
+        siv_enc = self.metrics['siv_encrypt']
         
-        if aes_enc or chacha_enc:
-            md += "| Metric | AES-GCM | ChaCha20 |\n"
-            md += "|--------|---------|----------|\n"
-            md += f"| Key A Length | {aes_enc.get('Key A Length', 'N/A')} | {chacha_enc.get('Key A Length', 'N/A')} |\n"
-            md += f"| Key B Length | {aes_enc.get('Key B Length', 'N/A')} | {chacha_enc.get('Key B Length', 'N/A')} |\n"
-            md += f"| Key B (1s count) | {aes_enc.get('Key B - 1s', 'N/A')} | {chacha_enc.get('Key B - 1s', 'N/A')} |\n"
-            md += f"| Key B (0s count) | {aes_enc.get('Key B - 0s', 'N/A')} | {chacha_enc.get('Key B - 0s', 'N/A')} |\n"
-            md += f"| A/B Match Percentage | {aes_enc.get('A/B Match %', 'N/A')} | {chacha_enc.get('A/B Match %', 'N/A')} |\n"
-            md += f"| Error Rate | {aes_enc.get('Error Rate', 'N/A')} | {chacha_enc.get('Error Rate', 'N/A')} |\n"
-            md += f"| Shannon Entropy | {aes_enc.get('Shannon Entropy', 'N/A')} | {chacha_enc.get('Shannon Entropy', 'N/A')} |\n"
-            md += f"| Key Confirmation | {aes_enc.get('Key Confirmation', 'N/A')} | {chacha_enc.get('Key Confirmation', 'N/A')} |\n\n"
+        if aes_enc or chacha_enc or siv_enc:
+            md += "| Metric | AES-GCM | ChaCha20 | AES-SIV |\n"
+            md += "|--------|---------|----------|---------|\n"
+            md += f"| Key A Length | {aes_enc.get('Key A Length', 'N/A')} | {chacha_enc.get('Key A Length', 'N/A')} | {siv_enc.get('Key A Length', 'N/A')} |\n"
+            md += f"| Key B Length | {aes_enc.get('Key B Length', 'N/A')} | {chacha_enc.get('Key B Length', 'N/A')} | {siv_enc.get('Key B Length', 'N/A')} |\n"
+            md += f"| Key B (1s count) | {aes_enc.get('Key B - 1s', 'N/A')} | {chacha_enc.get('Key B - 1s', 'N/A')} | {siv_enc.get('Key B - 1s', 'N/A')} |\n"
+            md += f"| Key B (0s count) | {aes_enc.get('Key B - 0s', 'N/A')} | {chacha_enc.get('Key B - 0s', 'N/A')} | {siv_enc.get('Key B - 0s', 'N/A')} |\n"
+            md += f"| A/B Match Percentage | {aes_enc.get('A/B Match %', 'N/A')} | {chacha_enc.get('A/B Match %', 'N/A')} | {siv_enc.get('A/B Match %', 'N/A')} |\n"
+            md += f"| Error Rate | {aes_enc.get('Error Rate', 'N/A')} | {chacha_enc.get('Error Rate', 'N/A')} | {siv_enc.get('Error Rate', 'N/A')} |\n"
+            md += f"| Shannon Entropy | {aes_enc.get('Shannon Entropy', 'N/A')} | {chacha_enc.get('Shannon Entropy', 'N/A')} | {siv_enc.get('Shannon Entropy', 'N/A')} |\n"
+            md += f"| Key Confirmation | {aes_enc.get('Key Confirmation', 'N/A')} | {chacha_enc.get('Key Confirmation', 'N/A')} | {siv_enc.get('Key Confirmation', 'N/A')} |\n\n"
             
             
         else:
@@ -165,15 +178,15 @@ class AutoMetricsExtractor:
         # Section 2: Encryption Performance
         md += "## 2️⃣ Encryption Performance Summary\n\n"
         
-        if aes_enc or chacha_enc:
-            md += "| Metric | AES-GCM | ChaCha20 |\n"
-            md += "|--------|---------|----------|\n"
-            md += f"| Timestamp | {aes_enc.get('Timestamp', 'N/A')} | {chacha_enc.get('Timestamp', 'N/A')} |\n"
-            md += f"| Encryption Time (s) | {aes_enc.get('Encryption Time', 'N/A')} | {chacha_enc.get('Encryption Time', 'N/A')} |\n"
-            md += f"| Original File Size (bytes) | {aes_enc.get('Original File Size', 'N/A')} | {chacha_enc.get('Original File Size', 'N/A')} |\n"
-            md += f"| Encrypted File Size (bytes) | {aes_enc.get('Encrypted File Size', 'N/A')} | {chacha_enc.get('Encrypted File Size', 'N/A')} |\n"
-            md += f"| SHA-256 Hash (Encrypted) | {aes_enc.get('SHA-256 Encrypted', 'N/A')[:16]}... | {chacha_enc.get('SHA-256 Encrypted', 'N/A')[:16]}... |\n"
-            md += f"| Post-Quantum Signature | {aes_enc.get('Post-Quantum Signature', 'N/A')} | {chacha_enc.get('Post-Quantum Signature', 'N/A')} |\n\n"
+        if aes_enc or chacha_enc or siv_enc:
+            md += "| Metric | AES-GCM | ChaCha20 | AES-SIV |\n"
+            md += "|--------|---------|----------|---------|\n"
+            md += f"| Timestamp | {aes_enc.get('Timestamp', 'N/A')} | {chacha_enc.get('Timestamp', 'N/A')} | {siv_enc.get('Timestamp', 'N/A')} |\n"
+            md += f"| Encryption Time (s) | {aes_enc.get('Encryption Time', 'N/A')} | {chacha_enc.get('Encryption Time', 'N/A')} | {siv_enc.get('Encryption Time', 'N/A')} |\n"
+            md += f"| Original File Size (bytes) | {aes_enc.get('Original File Size', 'N/A')} | {chacha_enc.get('Original File Size', 'N/A')} | {siv_enc.get('Original File Size', 'N/A')} |\n"
+            md += f"| Encrypted File Size (bytes) | {aes_enc.get('Encrypted File Size', 'N/A')} | {chacha_enc.get('Encrypted File Size', 'N/A')} | {siv_enc.get('Encrypted File Size', 'N/A')} |\n"
+            md += f"| SHA-256 Hash (Encrypted) | {aes_enc.get('SHA-256 Encrypted', 'N/A')[:16]}... | {chacha_enc.get('SHA-256 Encrypted', 'N/A')[:16]}... | {siv_enc.get('SHA-256 Encrypted', 'N/A')[:16]}... |\n"
+            md += f"| Post-Quantum Signature | {aes_enc.get('Post-Quantum Signature', 'N/A')} | {chacha_enc.get('Post-Quantum Signature', 'N/A')} | {siv_enc.get('Post-Quantum Signature', 'N/A')} |\n\n"
             
             md += "**Interpretation:**\n"
             
@@ -187,8 +200,24 @@ class AutoMetricsExtractor:
                         diff = ((aes_time - chacha_time) / aes_time) * 100
                         md += f"- ✔ ChaCha20 was {diff:.1f}% faster than AES-GCM in encryption\n"
                     else:
-                        diff = ((chacha_time - aes_time) / chacha_time) * 100
+                        diff = ((aes_time - chacha_time) / chacha_time) * 100
                         md += f"- ✔ AES-GCM was {diff:.1f}% faster than ChaCha20 in encryption\n"
+                    
+                    # AES-SIV comparison
+                    siv_enc = self.metrics.get('siv_encrypt', {})
+                    if siv_enc:
+                        siv_time_str = siv_enc.get('Encryption Time', '0').replace(' s', '').strip()
+                        try:
+                            siv_time = float(siv_time_str)
+                            if siv_time > 0:
+                                if siv_time < aes_time:
+                                    diff = ((aes_time - siv_time) / aes_time) * 100
+                                    md += f"- ✔ AES-SIV was {diff:.1f}% faster than AES-GCM in encryption\n"
+                                else:
+                                    diff = ((siv_time - aes_time) / siv_time) * 100
+                                    md += f"- ✔ AES-GCM was {diff:.1f}% faster than AES-SIV in encryption\n"
+                        except:
+                            pass
             except:
                 pass
             
@@ -204,15 +233,16 @@ class AutoMetricsExtractor:
         
         aes_dec = self.metrics['aes_decrypt']
         chacha_dec = self.metrics['chacha_decrypt']
+        siv_dec = self.metrics['siv_decrypt']
         
-        if aes_dec or chacha_dec:
-            md += "| Metric | AES-GCM | ChaCha20 |\n"
-            md += "|--------|---------|----------|\n"
-            md += f"| Timestamp | {aes_dec.get('Timestamp', 'N/A')} | {chacha_dec.get('Timestamp', 'N/A')} |\n"
-            md += f"| Decryption Time (s) | {aes_dec.get('Decryption Time', 'N/A')} | {chacha_dec.get('Decryption Time', 'N/A')} |\n"
-            md += f"| AEAD Authentication | {aes_dec.get('AEAD Authentication', 'N/A')} | {chacha_dec.get('AEAD Authentication', 'N/A')} |\n"
-            md += f"| Decrypted File Size (bytes) | {aes_dec.get('Decrypted File Size', 'N/A')} | {chacha_dec.get('Decrypted File Size', 'N/A')} |\n"
-            md += f"| SHA-256 Hash (Decrypted) | {aes_dec.get('SHA-256 Decrypted', 'N/A')[:16]}... | {chacha_dec.get('SHA-256 Decrypted', 'N/A')[:16]}... |\n\n"
+        if aes_dec or chacha_dec or siv_dec:
+            md += "| Metric | AES-GCM | ChaCha20 | AES-SIV |\n"
+            md += "|--------|---------|----------|---------|\n"
+            md += f"| Timestamp | {aes_dec.get('Timestamp', 'N/A')} | {chacha_dec.get('Timestamp', 'N/A')} | {siv_dec.get('Timestamp', 'N/A')} |\n"
+            md += f"| Decryption Time (s) | {aes_dec.get('Decryption Time', 'N/A')} | {chacha_dec.get('Decryption Time', 'N/A')} | {siv_dec.get('Decryption Time', 'N/A')} |\n"
+            md += f"| AEAD Authentication | {aes_dec.get('AEAD Authentication', 'N/A')} | {chacha_dec.get('AEAD Authentication', 'N/A')} | {siv_dec.get('AEAD Authentication', 'N/A')} |\n"
+            md += f"| Decrypted File Size (bytes) | {aes_dec.get('Decrypted File Size', 'N/A')} | {chacha_dec.get('Decrypted File Size', 'N/A')} | {siv_dec.get('Decrypted File Size', 'N/A')} |\n"
+            md += f"| SHA-256 Hash (Decrypted) | {aes_dec.get('SHA-256 Decrypted', 'N/A')[:16]}... | {chacha_dec.get('SHA-256 Decrypted', 'N/A')[:16]}... | {siv_dec.get('SHA-256 Decrypted', 'N/A')[:16]}... |\n\n"
             
             md += "**Interpretation:**\n"
             
@@ -233,8 +263,24 @@ class AutoMetricsExtractor:
                         diff = ((chacha_time - aes_time) / chacha_time) * 100
                         md += f"- ✔ AES-GCM was {diff:.1f}% faster than ChaCha20 in decryption\n"
                     else:
-                        diff = ((aes_time - chacha_time) / aes_time) * 100
+                        diff = ((chacha_time - aes_time) / chacha_time) * 100
                         md += f"- ✔ ChaCha20 was {diff:.1f}% faster than AES-GCM in decryption\n"
+                    
+                    # AES-SIV comparison
+                    siv_dec = self.metrics.get('siv_decrypt', {})
+                    if siv_dec:
+                        siv_time_str = siv_dec.get('Decryption Time', '0').replace(' s', '').strip()
+                        try:
+                            siv_time = float(siv_time_str)
+                            if siv_time > 0:
+                                if siv_time < aes_time:
+                                    diff = ((aes_time - siv_time) / aes_time) * 100
+                                    md += f"- ✔ AES-SIV was {diff:.1f}% faster than AES-GCM in decryption\n"
+                                else:
+                                    diff = ((siv_time - aes_time) / siv_time) * 100
+                                    md += f"- ✔ AES-GCM was {diff:.1f}% faster than AES-SIV in decryption\n"
+                        except:
+                            pass
             except:
                 pass
             
@@ -294,20 +340,21 @@ class AutoMetricsExtractor:
             
             aes_enc = self.metrics['aes_encrypt']
             chacha_enc = self.metrics['chacha_encrypt']
+            siv_enc = self.metrics['siv_encrypt']
             
-            if aes_enc or chacha_enc:
-                headers = ['Metric', 'AES-GCM', 'ChaCha20']
+            if aes_enc or chacha_enc or siv_enc:
+                headers = ['Metric', 'AES-GCM', 'ChaCha20', 'AES-SIV']
                 data = [
-                    ['Key A Length', aes_enc.get('Key A Length', 'N/A'), chacha_enc.get('Key A Length', 'N/A')],
-                    ['Key B Length', aes_enc.get('Key B Length', 'N/A'), chacha_enc.get('Key B Length', 'N/A')],
-                    ['Key B (1s count)', aes_enc.get('Key B - 1s', 'N/A'), chacha_enc.get('Key B - 1s', 'N/A')],
-                    ['Key B (0s count)', aes_enc.get('Key B - 0s', 'N/A'), chacha_enc.get('Key B - 0s', 'N/A')],
-                    ['A/B Match %', aes_enc.get('A/B Match %', 'N/A'), chacha_enc.get('A/B Match %', 'N/A')],
-                    ['Error Rate', aes_enc.get('Error Rate', 'N/A'), chacha_enc.get('Error Rate', 'N/A')],
-                    ['Shannon Entropy', aes_enc.get('Shannon Entropy', 'N/A'), chacha_enc.get('Shannon Entropy', 'N/A')],
-                    ['Key Confirmation', aes_enc.get('Key Confirmation', 'N/A'), chacha_enc.get('Key Confirmation', 'N/A')]
+                    ['Key A Length', aes_enc.get('Key A Length', 'N/A'), chacha_enc.get('Key A Length', 'N/A'), siv_enc.get('Key A Length', 'N/A')],
+                    ['Key B Length', aes_enc.get('Key B Length', 'N/A'), chacha_enc.get('Key B Length', 'N/A'), siv_enc.get('Key B Length', 'N/A')],
+                    ['Key B (1s count)', aes_enc.get('Key B - 1s', 'N/A'), chacha_enc.get('Key B - 1s', 'N/A'), siv_enc.get('Key B - 1s', 'N/A')],
+                    ['Key B (0s count)', aes_enc.get('Key B - 0s', 'N/A'), chacha_enc.get('Key B - 0s', 'N/A'), siv_enc.get('Key B - 0s', 'N/A')],
+                    ['A/B Match %', aes_enc.get('A/B Match %', 'N/A'), chacha_enc.get('A/B Match %', 'N/A'), siv_enc.get('A/B Match %', 'N/A')],
+                    ['Error Rate', aes_enc.get('Error Rate', 'N/A'), chacha_enc.get('Error Rate', 'N/A'), siv_enc.get('Error Rate', 'N/A')],
+                    ['Shannon Entropy', aes_enc.get('Shannon Entropy', 'N/A'), chacha_enc.get('Shannon Entropy', 'N/A'), siv_enc.get('Shannon Entropy', 'N/A')],
+                    ['Key Confirmation', aes_enc.get('Key Confirmation', 'N/A'), chacha_enc.get('Key Confirmation', 'N/A'), siv_enc.get('Key Confirmation', 'N/A')]
                 ]
-                pdf.create_table(headers, data, [70, 60, 60])
+                pdf.create_table(headers, data, [50, 45, 45, 45])
                 
                 pdf.set_font('Arial', 'B', 10)
                 # pdf.cell(0, 6, 'Interpretation:', ln=True)
@@ -320,17 +367,17 @@ class AutoMetricsExtractor:
             pdf.cell(0, 8, '2. Encryption Performance Summary', ln=True)
             pdf.ln(3)
             
-            if aes_enc or chacha_enc:
-                headers = ['Metric', 'AES-GCM', 'ChaCha20']
+            if aes_enc or chacha_enc or siv_enc:
+                headers = ['Metric', 'AES-GCM', 'ChaCha20', 'AES-SIV']
                 data = [
-                    ['Timestamp', aes_enc.get('Timestamp', 'N/A'), chacha_enc.get('Timestamp', 'N/A')],
-                    ['Encryption Time (s)', aes_enc.get('Encryption Time', 'N/A'), chacha_enc.get('Encryption Time', 'N/A')],
-                    ['Original File Size (bytes)', aes_enc.get('Original File Size', 'N/A'), chacha_enc.get('Original File Size', 'N/A')],
-                    ['Encrypted File Size (bytes)', aes_enc.get('Encrypted File Size', 'N/A'), chacha_enc.get('Encrypted File Size', 'N/A')],
-                    ['SHA-256 Hash', str(aes_enc.get('SHA-256 Encrypted', 'N/A'))[:20]+'...', str(chacha_enc.get('SHA-256 Encrypted', 'N/A'))[:20]+'...'],
-                    ['Post-Quantum Signature', aes_enc.get('Post-Quantum Signature', 'N/A'), chacha_enc.get('Post-Quantum Signature', 'N/A')]
+                    ['Timestamp', aes_enc.get('Timestamp', 'N/A'), chacha_enc.get('Timestamp', 'N/A'), siv_enc.get('Timestamp', 'N/A')],
+                    ['Encryption Time (s)', aes_enc.get('Encryption Time', 'N/A'), chacha_enc.get('Encryption Time', 'N/A'), siv_enc.get('Encryption Time', 'N/A')],
+                    ['Original File Size (bytes)', aes_enc.get('Original File Size', 'N/A'), chacha_enc.get('Original File Size', 'N/A'), siv_enc.get('Original File Size', 'N/A')],
+                    ['Encrypted File Size (bytes)', aes_enc.get('Encrypted File Size', 'N/A'), chacha_enc.get('Encrypted File Size', 'N/A'), siv_enc.get('Encrypted File Size', 'N/A')],
+                    ['SHA-256 Hash', str(aes_enc.get('SHA-256 Encrypted', 'N/A'))[:20]+'...', str(chacha_enc.get('SHA-256 Encrypted', 'N/A'))[:20]+'...', str(siv_enc.get('SHA-256 Encrypted', 'N/A'))[:20]+'...'],
+                    ['Post-Quantum Signature', aes_enc.get('Post-Quantum Signature', 'N/A'), chacha_enc.get('Post-Quantum Signature', 'N/A'), siv_enc.get('Post-Quantum Signature', 'N/A')]
                 ]
-                pdf.create_table(headers, data, [70, 60, 60])
+                pdf.create_table(headers, data, [50, 45, 45, 45])
                 
                 pdf.set_font('Arial', 'B', 10)
                 pdf.cell(0, 6, 'Interpretation:', ln=True)
@@ -344,8 +391,24 @@ class AutoMetricsExtractor:
                             diff = ((aes_time - chacha_time) / aes_time) * 100
                             pdf.multi_cell(0, 5, f'+ ChaCha20 was {diff:.1f}% faster than AES-GCM in encryption')
                         else:
-                            diff = ((chacha_time - aes_time) / chacha_time) * 100
+                            diff = ((aes_time - chacha_time) / chacha_time) * 100
                             pdf.multi_cell(0, 5, f'+ AES-GCM was {diff:.1f}% faster than ChaCha20 in encryption')
+                        
+                        # AES-SIV comparison
+                        siv_enc = self.metrics.get('siv_encrypt', {})
+                        if siv_enc:
+                            siv_time_str = siv_enc.get('Encryption Time', '0').replace(' s', '').strip()
+                            try:
+                                siv_time = float(siv_time_str)
+                                if siv_time > 0:
+                                    if siv_time < aes_time:
+                                        diff = ((aes_time - siv_time) / aes_time) * 100
+                                        pdf.multi_cell(0, 5, f'+ AES-SIV was {diff:.1f}% faster than AES-GCM in encryption')
+                                    else:
+                                        diff = ((siv_time - aes_time) / siv_time) * 100
+                                        pdf.multi_cell(0, 5, f'+ AES-GCM was {diff:.1f}% faster than AES-SIV in encryption')
+                            except:
+                                pass
                 except:
                     pass
                 
@@ -360,17 +423,18 @@ class AutoMetricsExtractor:
             
             aes_dec = self.metrics['aes_decrypt']
             chacha_dec = self.metrics['chacha_decrypt']
+            siv_dec = self.metrics['siv_decrypt']
             
-            if aes_dec or chacha_dec:
-                headers = ['Metric', 'AES-GCM', 'ChaCha20']
+            if aes_dec or chacha_dec or siv_dec:
+                headers = ['Metric', 'AES-GCM', 'ChaCha20', 'AES-SIV']
                 data = [
-                    ['Timestamp', aes_dec.get('Timestamp', 'N/A'), chacha_dec.get('Timestamp', 'N/A')],
-                    ['Decryption Time (s)', aes_dec.get('Decryption Time', 'N/A'), chacha_dec.get('Decryption Time', 'N/A')],
-                    ['AEAD Authentication', aes_dec.get('AEAD Authentication', 'N/A'), chacha_dec.get('AEAD Authentication', 'N/A')],
-                    ['Decrypted File Size (bytes)', aes_dec.get('Decrypted File Size', 'N/A'), chacha_dec.get('Decrypted File Size', 'N/A')],
-                    ['SHA-256 Hash', str(aes_dec.get('SHA-256 Decrypted', 'N/A'))[:20]+'...', str(chacha_dec.get('SHA-256 Decrypted', 'N/A'))[:20]+'...']
+                    ['Timestamp', aes_dec.get('Timestamp', 'N/A'), chacha_dec.get('Timestamp', 'N/A'), siv_dec.get('Timestamp', 'N/A')],
+                    ['Decryption Time (s)', aes_dec.get('Decryption Time', 'N/A'), chacha_dec.get('Decryption Time', 'N/A'), siv_dec.get('Decryption Time', 'N/A')],
+                    ['AEAD Authentication', aes_dec.get('AEAD Authentication', 'N/A'), chacha_dec.get('AEAD Authentication', 'N/A'), siv_dec.get('AEAD Authentication', 'N/A')],
+                    ['Decrypted File Size (bytes)', aes_dec.get('Decrypted File Size', 'N/A'), chacha_dec.get('Decrypted File Size', 'N/A'), siv_dec.get('Decrypted File Size', 'N/A')],
+                    ['SHA-256 Hash', str(aes_dec.get('SHA-256 Decrypted', 'N/A'))[:20]+'...', str(chacha_dec.get('SHA-256 Decrypted', 'N/A'))[:20]+'...', str(siv_dec.get('SHA-256 Decrypted', 'N/A'))[:20]+'...']
                 ]
-                pdf.create_table(headers, data, [70, 60, 60])
+                pdf.create_table(headers, data, [50, 45, 45, 45])
                 
                 pdf.set_font('Arial', 'B', 10)
                 pdf.cell(0, 6, 'Interpretation:', ln=True)
@@ -389,8 +453,24 @@ class AutoMetricsExtractor:
                             diff = ((chacha_time - aes_time) / chacha_time) * 100
                             pdf.multi_cell(0, 5, f'+ AES-GCM was {diff:.1f}% faster than ChaCha20 in decryption')
                         else:
-                            diff = ((aes_time - chacha_time) / aes_time) * 100
+                            diff = ((chacha_time - aes_time) / chacha_time) * 100
                             pdf.multi_cell(0, 5, f'+ ChaCha20 was {diff:.1f}% faster than AES-GCM in decryption')
+                        
+                        # AES-SIV comparison
+                        siv_dec = self.metrics.get('siv_decrypt', {})
+                        if siv_dec:
+                            siv_time_str = siv_dec.get('Decryption Time', '0').replace(' s', '').strip()
+                            try:
+                                siv_time = float(siv_time_str)
+                                if siv_time > 0:
+                                    if siv_time < aes_time:
+                                        diff = ((aes_time - siv_time) / aes_time) * 100
+                                        pdf.multi_cell(0, 5, f'+ AES-SIV was {diff:.1f}% faster than AES-GCM in decryption')
+                                    else:
+                                        diff = ((siv_time - aes_time) / siv_time) * 100
+                                        pdf.multi_cell(0, 5, f'+ AES-GCM was {diff:.1f}% faster than AES-SIV in decryption')
+                            except:
+                                pass
                 except:
                     pass
                 
@@ -416,7 +496,7 @@ def main():
     print("\n" + "=" * 60 + "\n")
     
     # Default path - change this to your PDF reports folder
-    default_path = r"C:\Users\Qadri laptop\Downloads\New folder (2)\BB84-Quantum-Encryption-Tool-Simulator\testing\Video"
+    default_path = r"C:\Users\Qadri laptop\Downloads\New folder (2)\BB84-Quantum-Encryption-Tool-Simulator\testing\pdf_one page"
     # Get results folder path
     results_folder = input(f"Enter PDF folder path (press Enter for default):\n[{default_path}]\n> ").strip().strip('"')
     if not results_folder:

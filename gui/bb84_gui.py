@@ -23,6 +23,7 @@ from fpdf import FPDF
 # Extend Python path to allow module imports from parent directory
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from bb84_backend.logic.controller import encrypt_file_local, decrypt_file_local
+from bb84_backend.core.bb84_quantum import run_qkd, run_qkd_demo
 
 class BB84App:
     def __init__(self, root):
@@ -60,19 +61,20 @@ class BB84App:
         self.file_label = tk.Label(self.root, text="No file selected", bg="#f4f4f4")
         self.file_label.pack(pady=2)
 
-        # Cipher selection (AES-GCM or ChaCha20) - only shown in encryption mode
+        # Cipher selection (AES-GCM, ChaCha20, or AES-SIV) - only shown in encryption mode
         self.cipher_frame = tk.Frame(self.root, bg="#f4f4f4")
-        cipher_label = tk.Label(self.cipher_frame, text="Encryption Algorithm:", bg="#f4f4f4", font=("Arial", 10))
+        cipher_label = tk.Label(self.cipher_frame, text="Encryption Algorithm:", bg="#f4f4f4", font=("Arial", 10, "bold"))
         cipher_label.pack(side=tk.LEFT, padx=5)
         
         self.cipher_choice = ttk.Combobox(
             self.cipher_frame,
             values=[
                 "AES-GCM (Best for Desktop/Server with AES-NI)",
-                "ChaCha20 (Best for Mobile/ARM/Embedded)"
+                "ChaCha20 (Best for Mobile/ARM/Embedded)",
+                "AES-SIV (Misuse-resistant, No nonce required)"
             ],
             state="readonly",
-            width=50
+            width=55
         )
         self.cipher_choice.current(0)  # Default to AES-GCM
         self.cipher_choice.pack(side=tk.LEFT, padx=5)
@@ -145,6 +147,7 @@ AES-GCM (AES-256-GCM):
 ✅ Hardware: Intel/AMD with AES-NI instruction set
 ✅ Speed: 4-10x faster with hardware acceleration
 ✅ Standard: NIST approved, most widely used
+✅ Nonce: 12-byte random nonce per encryption
 ✅ Use when: Running on x86/x64 systems
 
 ChaCha20 (ChaCha20-Poly1305):
@@ -152,29 +155,45 @@ ChaCha20 (ChaCha20-Poly1305):
 ✅ Hardware: No special instructions needed
 ✅ Speed: 5-15x faster than AES on ARM
 ✅ Standard: IETF RFC 8439, used in TLS 1.3
+✅ Nonce: 12-byte random nonce per encryption
 ✅ Use when: Running on ARM, mobile, or older CPUs
 
-Both provide:
+AES-SIV (AES-256-SIV):
+✅ Best for: Research & high-security applications
+✅ Hardware: Software implementation (no HW needed)
+✅ Speed: Slightly slower than AES-GCM
+✅ Standard: RFC 5297 (Synthetic IV mode)
+✅ Nonce: NO nonce needed (misuse-resistant!)
+✅ Use when: Nonce management is difficult/critical
+✅ Advantage: Safe against nonce reuse attacks
+
+All three provide:
 • 256-bit encryption (quantum-resistant)
 • AEAD authentication (tamper detection)
 • BB84 quantum key distribution
 • Post-quantum Dilithium5 signatures
 
-Security: Both are equivalent ✅"""
+Security: All are cryptographically secure ✅
+AES-SIV provides additional misuse-resistance ✨"""
         
         messagebox.showinfo("Cipher Selection Guide", info_text)
 
     def simulate_quantum_process(self, cipher="AES-GCM"):
         # Simulate quantum key exchange visually
-        cipher_name = "ChaCha20 key" if "ChaCha20" in cipher else "AES-256 key"
+        if "ChaCha20" in cipher:
+            cipher_name = "ChaCha20 key"
+        elif "AES-SIV" in cipher:
+            cipher_name = "AES-SIV key"
+        else:
+            cipher_name = "AES-256 key"
         steps = [
             "Initializing quantum channel...",
-            "Alice is generating random bits...",
-            "Bob is choosing bases...",
-            "Qubits are being sent over the channel...",
-            "Bob measures the qubits...",
-            "Alice and Bob compare bases...",
-            "Final key is extracted from matching bases.",
+            "Alice generates random bits + biased bases...",
+            "Channel noise/loss modeling active...",
+            "(Optional) Eavesdropper intercept-resend simulation...",
+            "Bob measures qubits with chosen bases...",
+            "Basis reconciliation & sampling...",
+            "Privacy & finite-key analysis computed...",
             f"Key used to derive {cipher_name}...",
             "Encryption process complete."
         ]
@@ -248,6 +267,8 @@ Security: Both are equivalent ✅"""
             cipher_selection = self.cipher_choice.get()
             if "ChaCha20" in cipher_selection:
                 cipher = "ChaCha20"
+            elif "AES-SIV" in cipher_selection:
+                cipher = "AES-SIV"
             else:
                 cipher = "AES-GCM"
             self.simulate_quantum_process(cipher)
@@ -267,17 +288,26 @@ Security: Both are equivalent ✅"""
             cipher = "ChaCha20"
             cipher_display = "ChaCha20-Poly1305"
             cipher_prefix = "CHACHA20"
+        elif "AES-SIV" in cipher_selection:
+            cipher = "AES-SIV"
+            cipher_display = "AES-256-SIV (Misuse-resistant)"
+            cipher_prefix = "AES-SIV"
         else:
             cipher = "AES-GCM"
             cipher_display = "AES-256-GCM"
             cipher_prefix = "AES-GCM"
 
         # Encrypt with selected cipher
+        # Run upgraded QKD with noisy demo settings to show realistic QBER
+        _, key_b_bits, stats = run_qkd_demo()
+        # Proceed with encryption (controller internally uses run_qkd now)
         encrypted_data, key_b = encrypt_file_local(
             file_bytes, 
             os.path.basename(self.file_path),
             cipher=cipher
         )
+        # Append runtime QKD stats for user visibility
+        self.output_box.insert(tk.END, f"QKD Stats → Sifted: {int(stats.get('n_sifted',0))}, QBER: {stats.get('qber',0.0):.4f}, ell: {stats.get('ell_final',0.0):.2f}\n")
 
         # Auto-generate filename for encrypted file with cipher type
         if self.file_name_without_ext:
@@ -339,6 +369,8 @@ Security: Both are equivalent ✅"""
             self.cipher_used = "AES-GCM"
         elif "CHACHA20" in encrypted_filename:
             self.cipher_used = "CHACHA20"
+        elif "AES-SIV" in encrypted_filename:
+            self.cipher_used = "AES-SIV"
         else:
             self.cipher_used = None
 

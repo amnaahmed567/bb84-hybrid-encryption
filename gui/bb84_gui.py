@@ -45,98 +45,172 @@ class BB84App:
         self.create_widgets()
 
     def create_widgets(self):
-        # Radio buttons for selecting mode: encryption or decryption
+        # Modern dark-themed layout with grouped panels
+        # Colors and basic style tokens (light theme)
+        self._DARK_BG = "#f4f7fb"   # window background (light)
+        self._CARD_BG = "#ffffff"   # card/panel background
+        self._FG = "#0b1720"        # primary text (dark)
+        self._ACCENT = "#0b73ff"    # blue accent
+        self._BTN_BG = "#eef2f6"    # neutral button background
+
+        self.root.configure(bg=self._DARK_BG)
+
+        # Title header (centered)
+        header = tk.Frame(self.root, bg=self._DARK_BG)
+        header.pack(fill=tk.X, pady=(12, 6))
+        title_lbl = tk.Label(header, text="🔐 BB84 Quantum Encryption", font=("Segoe UI", 20, "bold"), fg=self._FG, bg=self._DARK_BG)
+        title_lbl.pack()
+        subtitle = tk.Label(header, text="Hybrid PQC + AEAD — Research Demo", font=("Segoe UI", 10), fg="#475569", bg=self._DARK_BG)
+        subtitle.pack()
+
+        main_frame = tk.Frame(self.root, bg=self._DARK_BG)
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=16, pady=8)
+
+        # Left panel: Controls (cards)
+        left = tk.Frame(main_frame, bg=self._DARK_BG)
+        left.pack(side=tk.LEFT, fill=tk.Y, padx=(0,12))
+
+        # Mode card (segmented toggle)
+        mode_card = tk.Frame(left, bg=self._CARD_BG, bd=0, relief=tk.FLAT)
+        mode_card.pack(fill=tk.X, pady=6)
+        tk.Label(mode_card, text="Mode", fg="#9fb3bd", bg=self._CARD_BG, font=("Segoe UI", 9, "bold")).pack(anchor=tk.W, padx=10, pady=(8,0))
+        seg = tk.Frame(mode_card, bg=self._CARD_BG)
+        seg.pack(padx=10, pady=8)
         self.mode_var = tk.StringVar(value="encrypt")
+        self.encrypt_btn = tk.Button(seg, text="Encrypt", command=lambda: self._set_mode("encrypt"), bg=self._BTN_BG, fg=self._FG, bd=0, padx=12, pady=6)
+        self.decrypt_btn = tk.Button(seg, text="Decrypt", command=lambda: self._set_mode("decrypt"), bg=self._BTN_BG, fg=self._FG, bd=0, padx=12, pady=6)
+        self.encrypt_btn.pack(side=tk.LEFT, padx=(0,4))
+        self.decrypt_btn.pack(side=tk.LEFT)
+        self._update_segmented()
 
-        title = tk.Label(self.root, text="BB84 Quantum Encryption / Decryption", font=("Arial", 16, "bold"), bg="#f4f4f4")
-        title.pack(pady=10)
+        # File card: drag/drop area
+        file_card = tk.Frame(left, bg=self._CARD_BG)
+        file_card.pack(fill=tk.X, pady=6)
+        tk.Label(file_card, text="File Input", fg="#9fb3bd", bg=self._CARD_BG, font=("Segoe UI", 9, "bold")).pack(anchor=tk.W, padx=10, pady=(8,0))
+        drop_area = tk.Frame(file_card, bg="#eef2f6", height=90, bd=1, relief=tk.FLAT)
+        drop_area.pack(fill=tk.X, padx=10, pady=8)
+        drop_area.pack_propagate(False)
+        self.drop_label = tk.Label(drop_area, text="Drag & drop a file here or click to browse", fg="#475569", bg="#eef2f6")
+        self.drop_label.pack(expand=True)
+        drop_area.bind("<Button-1>", lambda e: self.select_file())
+        # Try to enable TkinterDnD drag-and-drop when available
+        try:
+            from tkinterdnd2 import DND_FILES, TkinterDnD
+            def _on_drop(event):
+                files = event.data
+                # Windows may wrap path in {} when spaces
+                if files.startswith('{') and files.endswith('}'):
+                    files = files[1:-1]
+                self._on_file_dropped(files)
+            # register drop
+            drop_area.drop_target_register(DND_FILES)
+            drop_area.dnd_bind('<<Drop>>', _on_drop)
+        except Exception:
+            # fallback: no external DnD support
+            pass
 
-        mode_frame = tk.Frame(self.root, bg="#f4f4f4")
-        tk.Radiobutton(mode_frame, text="Encrypt", variable=self.mode_var, value="encrypt", bg="#f4f4f4", command=self.update_mode).pack(side=tk.LEFT, padx=10)
-        tk.Radiobutton(mode_frame, text="Decrypt", variable=self.mode_var, value="decrypt", bg="#f4f4f4", command=self.update_mode).pack(side=tk.LEFT, padx=10)
-        mode_frame.pack(pady=5)
+        self.file_label = tk.Label(file_card, text="No file selected", fg=self._FG, bg=self._CARD_BG)
+        self.file_label.pack(anchor=tk.W, padx=10, pady=(0,8))
 
-        # File selection button and label
-        tk.Button(self.root, text="Select File", command=self.select_file, bg="#d0eaff").pack(pady=5)
-        self.file_label = tk.Label(self.root, text="No file selected", bg="#f4f4f4")
-        self.file_label.pack(pady=2)
-
-        # Cipher selection (AES-GCM, ChaCha20, or AES-SIV) - only shown in encryption mode
-        self.cipher_frame = tk.Frame(self.root, bg="#f4f4f4")
-        cipher_label = tk.Label(self.cipher_frame, text="Encryption Algorithm:", bg="#f4f4f4", font=("Arial", 10, "bold"))
-        cipher_label.pack(side=tk.LEFT, padx=5)
-        
-        self.cipher_choice = ttk.Combobox(
-            self.cipher_frame,
-            values=[
-                "AES-GCM",
-                "ChaCha20",
-                "AES-SIV "
-            ],
-            state="readonly",
-            width=55
-        )
-        self.cipher_choice.current(0)  # Default to AES-GCM
-        self.cipher_choice.pack(side=tk.LEFT, padx=5)
-        
-        # Add info button for cipher selection
-        info_button = tk.Button(
-            self.cipher_frame, 
-            text="ℹ️", 
-            command=self.show_cipher_info,
-            bg="#e0e0e0",
-            width=3
-        )
-        info_button.pack(side=tk.LEFT, padx=2)
-        self.cipher_frame.pack(pady=5)
-
-        # Entry field for Key B (only used in decryption mode)
-        self.key_frame = tk.Frame(self.root, bg="#f4f4f4")
-        self.key_entry = tk.Entry(self.key_frame, width=80)
+        # Key input (for decryption) - hidden by default
+        self.key_frame = tk.Frame(left, bg=self._CARD_BG)
+        tk.Label(self.key_frame, text="Key B (binary):", fg="#475569", bg=self._CARD_BG).pack(anchor=tk.W, padx=10, pady=(8,0))
+        self.key_entry = tk.Entry(self.key_frame, width=36)
         self.key_entry.insert(0, "Key B (only for decryption)")
-        self.key_entry.pack(side=tk.LEFT, padx=5)
-        tk.Button(self.key_frame, text="Import Key File", command=self.import_key_file, bg="#e0ffe0").pack(side=tk.LEFT)
-        self.key_frame.pack(pady=5)
+        self.key_entry.pack(padx=10, pady=6)
+        ttk.Button(self.key_frame, text="Import Key File", command=self.import_key_file).pack(padx=10, pady=(0,8))
+        self.key_frame.pack_forget()
 
-        # Buttons to copy or save Key B (only shown after encryption)
-        self.copy_button = tk.Button(self.root, text="Copy Key B", command=self.copy_key_b, bg="#ffd0d0")
-        self.copy_button.pack(pady=2)
+        # Encryption settings card
+        self.alg_card = tk.Frame(left, bg=self._CARD_BG)
+        self.alg_card.pack(fill=tk.X, pady=6)
+        tk.Label(self.alg_card, text="Encryption Settings", fg="#9fb3bd", bg=self._CARD_BG, font=("Segoe UI", 9, "bold")).pack(anchor=tk.W, padx=10, pady=(8,0))
+        alg_row = tk.Frame(self.alg_card, bg=self._CARD_BG)
+        alg_row.pack(fill=tk.X, padx=10, pady=8)
+        self.cipher_choice = ttk.Combobox(alg_row, values=["🔷 AES-GCM", "⚡ ChaCha20", "🔐 AES-SIV"], state="readonly", width=28)
+        self.cipher_choice.current(0)
+        self.cipher_choice.pack(side=tk.LEFT)
+        ttk.Button(alg_row, text="ℹ️", command=self.show_cipher_info).pack(side=tk.LEFT, padx=8)
+
+        # Execution card
+        exec_card = tk.Frame(left, bg=self._CARD_BG)
+        exec_card.pack(fill=tk.X, pady=6)
+        tk.Label(exec_card, text="Execute", fg="#9fb3bd", bg=self._CARD_BG, font=("Segoe UI", 9, "bold")).pack(anchor=tk.W, padx=10, pady=(8,0))
+        run_row = tk.Frame(exec_card, bg=self._CARD_BG)
+        run_row.pack(fill=tk.X, padx=10, pady=10)
+        self.run_btn = tk.Button(run_row, text="Run", command=self.run, bg=self._ACCENT, fg="#ffffff", padx=18, pady=8, bd=0)
+        self.run_btn.pack(side=tk.LEFT)
+        ttk.Button(run_row, text="Download Report", command=self.download_metrics_pdf).pack(side=tk.LEFT, padx=8)
+
+        # Right panel: status & logs
+        right = tk.Frame(main_frame, bg=self._DARK_BG)
+        right.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        status_card = tk.Frame(right, bg=self._CARD_BG)
+        status_card.pack(fill=tk.X, pady=6)
+        tk.Label(status_card, text="Status", fg="#9fb3bd", bg=self._CARD_BG, font=("Segoe UI", 9, "bold")).pack(anchor=tk.W, padx=10, pady=(8,0))
+        status_row = tk.Frame(status_card, bg=self._CARD_BG)
+        status_row.pack(fill=tk.X, padx=10, pady=8)
+        self.status_badge = tk.Label(status_row, text="Idle", bg="#e6eef3", fg=self._FG, padx=8, pady=4)
+        self.status_badge.pack(side=tk.LEFT)
+        # small visual status text (for step display)
+        self.visual_text = tk.StringVar(value="Idle")
+        self.visual_label = tk.Label(status_row, textvariable=self.visual_text, fg="#475569", bg=self._CARD_BG)
+        self.visual_label.pack(side=tk.LEFT, padx=10)
+        self.progress = ttk.Progressbar(status_row, orient=tk.HORIZONTAL, mode='determinate', length=240)
+        self.progress.pack(side=tk.LEFT, padx=12)
+
+        # Logs console (scrollable)
+        logs_card = tk.Frame(right, bg=self._CARD_BG)
+        logs_card.pack(fill=tk.BOTH, expand=True, pady=6)
+        tk.Label(logs_card, text="Console", fg="#9fb3bd", bg=self._CARD_BG, font=("Segoe UI", 9, "bold")).pack(anchor=tk.W, padx=10, pady=(8,0))
+        self.output_box = ScrolledText(logs_card, height=12, bg="#ffffff", fg=self._FG, insertbackground=self._FG)
+        self.output_box.pack(fill=tk.BOTH, expand=True, padx=10, pady=8)
+
+        # Key controls (hidden unless after encrypt)
+        key_controls = tk.Frame(right, bg=self._CARD_BG)
+        key_controls.pack(fill=tk.X, pady=6)
+        self.copy_button = tk.Button(key_controls, text="Copy Key B", command=self.copy_key_b, bg=self._BTN_BG, fg=self._FG, bd=0)
+        self.copy_button.pack(side=tk.LEFT, padx=6)
         self.copy_button.pack_forget()
-
-        self.save_key_button = tk.Button(self.root, text="Save Key B to .txt", command=self.save_key_b_to_file, bg="#ffe4b5")
-        self.save_key_button.pack(pady=2)
+        self.save_key_button = tk.Button(key_controls, text="Save Key B", command=self.save_key_b_to_file, bg=self._BTN_BG, fg=self._FG, bd=0)
+        self.save_key_button.pack(side=tk.LEFT, padx=6)
         self.save_key_button.pack_forget()
 
-        # Main execution button
-        tk.Button(self.root, text="Run", command=self.run, bg="#c0ffc0").pack(pady=10)
-        tk.Button(self.root, text="Download Metrics Report (PDF)", command=self.download_metrics_pdf, bg="#dcdcdc").pack(pady=5)
-
-        # Output log area
-        self.output_box = ScrolledText(self.root, height=10, bg="#ffffff")
-        self.output_box.pack(padx=10, pady=10, fill=tk.BOTH, expand=True)
-
-        # Visual indicator for quantum process
-        self.visual_frame = tk.Label(self.root, text="Quantum Key Exchange Simulation Status", bg="#f4f4f4", font=("Arial", 10, "italic"))
-        self.visual_frame.pack(pady=5)
-        self.visual_text = tk.StringVar(value="Idle")
-        self.visual_label = tk.Label(self.root, textvariable=self.visual_text, bg="#ffffcc", width=80)
-        self.visual_label.pack(pady=5)
-
-        # Set visibility of GUI sections based on selected mode
+        # Keep references and initialize
+        self._set_status("Idle", color="#6b7280")
         self.update_mode()
 
     def update_mode(self):
         # Update GUI layout based on selected operation mode
         if self.mode_var.get() == "encrypt":
-            self.cipher_frame.pack(pady=5)
-            self.key_frame.pack_forget()
-            self.copy_button.pack_forget()
-            self.save_key_button.pack_forget()
+            try:
+                self.alg_card.pack(fill=tk.X, pady=6)
+            except Exception:
+                pass
+            try:
+                self.key_frame.pack_forget()
+            except Exception:
+                pass
+            try:
+                self.copy_button.pack_forget()
+                self.save_key_button.pack_forget()
+            except Exception:
+                pass
         else:
-            self.cipher_frame.pack_forget()
-            self.key_frame.pack(pady=5)
-            self.copy_button.pack_forget()
-            self.save_key_button.pack_forget()
+            try:
+                self.alg_card.pack_forget()
+            except Exception:
+                pass
+            try:
+                self.key_frame.pack(pady=5)
+            except Exception:
+                pass
+            try:
+                self.copy_button.pack_forget()
+                self.save_key_button.pack_forget()
+            except Exception:
+                pass
 
     def show_cipher_info(self):
         """Show information about cipher selection"""
@@ -179,7 +253,7 @@ AES-SIV provides additional misuse-resistance ✨"""
         messagebox.showinfo("Cipher Selection Guide", info_text)
 
     def simulate_quantum_process(self, cipher="AES-GCM"):
-        # Simulate quantum key exchange visually
+        # Simulate quantum key exchange visually using progress bar and status
         if "ChaCha20" in cipher:
             cipher_name = "ChaCha20 key"
         elif "AES-SIV" in cipher:
@@ -197,11 +271,79 @@ AES-SIV provides additional misuse-resistance ✨"""
             f"Key used to derive {cipher_name}...",
             "Encryption process complete."
         ]
-        for step in steps:
+
+        total = len(steps)
+        try:
+            self.progress['maximum'] = total
+            self.progress['value'] = 0
+        except Exception:
+            pass
+
+        self._set_status("Running", color="#f59e0b")
+        for i, step in enumerate(steps, start=1):
             self.visual_text.set(step)
+            try:
+                self.progress['value'] = i
+            except Exception:
+                pass
+            # append to console for visibility
+            try:
+                self.output_box.insert(tk.END, f"{step}\n")
+                self.output_box.see(tk.END)
+            except Exception:
+                pass
             self.root.update()
-            time.sleep(0.7)
+            time.sleep(0.6)
+
         self.visual_text.set("Idle")
+        self._set_status("Idle", color="#6b7280")
+
+    # ---- Helper UI methods ----
+    def _set_mode(self, mode: str):
+        self.mode_var.set(mode)
+        self._update_segmented()
+        self.update_mode()
+
+    def _update_segmented(self):
+        # Visual state for segmented control
+        try:
+            if self.mode_var.get() == "encrypt":
+                self.encrypt_btn.configure(bg=self._ACCENT, fg="#ffffff")
+                self.decrypt_btn.configure(bg=self._BTN_BG, fg=self._FG)
+            else:
+                self.decrypt_btn.configure(bg=self._ACCENT, fg="#ffffff")
+                self.encrypt_btn.configure(bg=self._BTN_BG, fg=self._FG)
+        except Exception:
+            pass
+
+    def _on_file_dropped(self, files: str):
+        # files may contain several paths; take the first
+        first = files.split() if isinstance(files, str) else [files]
+        if first:
+            path = first[0].strip()
+            # remove braces sometimes added by TkinterDnD
+            if path.startswith('{') and path.endswith('}'):
+                path = path[1:-1]
+            self._set_file(path)
+
+    def _set_file(self, path: str):
+        if os.path.exists(path):
+            self.file_path = path
+            base_name = os.path.basename(path)
+            self.file_name_without_ext = os.path.splitext(base_name)[0]
+            try:
+                self.file_label.config(text=f"Selected: {base_name}")
+                self.drop_label.config(text=base_name)
+            except Exception:
+                pass
+
+    def _set_status(self, text: str, color: str = None):
+        try:
+            self.status_badge.config(text=text)
+            if color:
+                self.status_badge.config(bg=color)
+        except Exception:
+            pass
 
     def select_file(self):
         # Prompt user to select a file from the system

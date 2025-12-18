@@ -36,6 +36,14 @@ from cryptography.exceptions import InvalidTag
 from bb84_backend.core.chacha20_engine import chacha20_encrypt, chacha20_decrypt
 from bb84_backend.core.key_utils import derive_chacha20_key_from_bits
 
+# Optional compression: prefer zstandard for speed/ratio, fallback to gzip
+try:
+    import zstandard as zstd
+    ZSTD_AVAILABLE = True
+except Exception:
+    import gzip
+    ZSTD_AVAILABLE = False
+
 # Post-quantum signature (same as AES-GCM packager)
 try:
     from dilithium import Dilithium, DEFAULT_PARAMETERS
@@ -109,9 +117,22 @@ def save_encrypted_file_chacha20(
     # 1) Derive ChaCha20 key with salt using Key A (Alice's quantum key)
     key_with_salt = derive_chacha20_key_from_bits(key_a_bits)
 
-    # 2) Build internal payload (encrypted, not exposed)
+    # 2) Compress plaintext before packaging
+    if plaintext is None:
+        plaintext = b""
+
+    if ZSTD_AVAILABLE:
+        cctx = zstd.ZstdCompressor(level=3)
+        compressed = cctx.compress(plaintext)
+        compression_used = "zstd"
+    else:
+        compressed = gzip.compress(plaintext, compresslevel=6)
+        compression_used = "gzip"
+
     internal_payload = {
-        "file_bytes_b64": base64.b64encode(plaintext).decode("utf-8"),
+        "file_bytes_b64": base64.b64encode(compressed).decode("utf-8"),
+        "compression": compression_used,
+        "original_size": len(plaintext),
     }
     internal_bytes = json.dumps(internal_payload).encode("utf-8")
 
@@ -266,10 +287,32 @@ def load_and_decrypt_bytes_chacha20(
     except Exception:
         return b"", {}, False
 
-    # 7) Parse internal payload
+    # 7) Parse internal payload and decompress
     try:
         internal = json.loads(internal_bytes.decode("utf-8"))
-        plaintext = base64.b64decode(internal["file_bytes_b64"])
+        compressed_bytes = base64.b64decode(internal["file_bytes_b64"])
+    except Exception:
+        return b"", {}, False
+
+    compression_used = internal.get("compression", "")
+    try:
+        if compression_used == "zstd" and ZSTD_AVAILABLE:
+            dctx = zstd.ZstdDecompressor()
+            plaintext = dctx.decompress(compressed_bytes)
+        elif compression_used == "gzip":
+            plaintext = gzip.decompress(compressed_bytes)
+        else:
+            if ZSTD_AVAILABLE:
+                try:
+                    dctx = zstd.ZstdDecompressor()
+                    plaintext = dctx.decompress(compressed_bytes)
+                except Exception:
+                    plaintext = compressed_bytes
+            else:
+                try:
+                    plaintext = gzip.decompress(compressed_bytes)
+                except Exception:
+                    plaintext = compressed_bytes
     except Exception:
         return b"", {}, False
 

@@ -17,6 +17,14 @@ from bb84_backend.core.key_utils import (
     derive_aes_key_from_bits,
 )
 
+# Optional compression: prefer zstandard for speed/ratio, fallback to gzip
+try:
+    import zstandard as zstd
+    ZSTD_AVAILABLE = True
+except Exception:
+    import gzip
+    ZSTD_AVAILABLE = False
+
 # ----------------------------------------------------------------------------
 # Post-quantum (Dilithium) import — this build exposes DEFAULT_PARAMETERS
 # and instance methods: keygen(seed), sign_with_input(sk, m), verify(pk, m, sig)
@@ -68,9 +76,22 @@ def save_encrypted_file(
     # Note: We place `original_filename` in the OUTER package so it can be
     # included in AAD (authenticated but not encrypted). The INTERNAL payload
     # therefore omits filename to avoid duplication.
+    # Compress plaintext before packaging to reduce ciphertext size
+    if plaintext is None:
+        plaintext = b""
+
+    if ZSTD_AVAILABLE:
+        cctx = zstd.ZstdCompressor(level=3)
+        compressed = cctx.compress(plaintext)
+        compression_used = "zstd"
+    else:
+        compressed = gzip.compress(plaintext, compresslevel=6)
+        compression_used = "gzip"
+
     internal_payload = {
-        "file_bytes_b64": base64.b64encode(plaintext).decode("utf-8"),
-        # "extension": "bin",  # add if you track it elsewhere
+        "file_bytes_b64": base64.b64encode(compressed).decode("utf-8"),
+        "compression": compression_used,
+        "original_size": len(plaintext),
     }
     internal_bytes = json.dumps(internal_payload).encode("utf-8")
 
@@ -182,10 +203,35 @@ def load_and_decrypt_bytes(
     except Exception:
         return b"", {}, False
 
-    # 6) Rehydrate original content
+    # 6) Rehydrate original content (decompress after decoding)
     try:
-        plaintext = base64.b64decode(internal["file_bytes_b64"])
+        compressed_bytes = base64.b64decode(internal["file_bytes_b64"])
     except KeyError:
+        return b"", {}, False
+
+    # Decompress based on stored compression metadata
+    compression_used = internal.get("compression", "")
+    try:
+        if compression_used == "zstd" and ZSTD_AVAILABLE:
+            dctx = zstd.ZstdDecompressor()
+            plaintext = dctx.decompress(compressed_bytes)
+        elif compression_used == "gzip":
+            plaintext = gzip.decompress(compressed_bytes)
+        else:
+            # Unknown or missing compression field — attempt zstd first, then raw
+            if ZSTD_AVAILABLE:
+                try:
+                    dctx = zstd.ZstdDecompressor()
+                    plaintext = dctx.decompress(compressed_bytes)
+                except Exception:
+                    # fallback to raw bytes
+                    plaintext = compressed_bytes
+            else:
+                try:
+                    plaintext = gzip.decompress(compressed_bytes)
+                except Exception:
+                    plaintext = compressed_bytes
+    except Exception:
         return b"", {}, False
 
     # 7) Metadata (extracted from INTERNAL payload if stored)

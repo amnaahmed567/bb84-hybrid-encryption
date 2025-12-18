@@ -135,21 +135,28 @@ flowchart TD
 flowchart TD
     Start([HKDF Key Derivation]) --> Input[Input:<br/>BB84 Key A 256 bits<br/>Random Salt 16 bytes]
     
-    Input --> Extract[HKDF-Extract Phase:<br/>PRK = HMAC-SHA256 salt IKM]
-    Extract --> PRK[Pseudorandom Key PRK<br/>32 bytes 256 bits]
+    Input --> Extract[HKDF-Extract Phase:<br/>PRK = HMAC-SHA256]
+    Extract --> PRK[Pseudorandom Key PRK<br/>32 bytes]
     
-    PRK --> Expand[HKDF-Expand Phase]
-    Expand --> Branch{Cipher Type?}
+    PRK --> Expand[HKDF-Expand Phase:<br/>Generate multiple keys]
     
-    Branch -->|AES-GCM/ChaCha20| Expand32[Expand to 32 bytes:<br/>info = encryption_key<br/>length = 32]
-    Branch -->|AES-SIV| Expand64[Expand to 64 bytes:<br/>info = encryption_key<br/>length = 64]
+    Expand --> Split[Split PRK into 3 parts]
     
-    Expand32 --> Keys32[Output:<br/>Encryption Key: 32 bytes<br/>Auth Key: 32 bytes optional<br/>Signature Key: Dilithium5]
+    Split --> Key1[Part 1: Encryption Key<br/>32 or 64 bytes<br/>Based on cipher type]
+    Split --> Key2[Part 2: Authentication Key<br/>32 bytes<br/>For AEAD operations]
+    Split --> Key3[Part 3: Signature Key<br/>Variable size<br/>For Dilithium5]
     
-    Expand64 --> Keys64[Output:<br/>Encryption Key: 64 bytes<br/>two 256-bit keys<br/>Signature Key: Dilithium5]
+    Key1 --> Combine[Combine All Keys]
+    Key2 --> Combine
+    Key3 --> Combine
     
-    Keys32 --> End([Keys Ready for Encryption])
-    Keys64 --> End
+    Combine --> Final{Cipher<br/>Requires?}
+    
+    Final -->|32 bytes| Output32[Total: 96+ bytes<br/>Encryption: 32<br/>Auth: 32<br/>Signature: variable]
+    Final -->|64 bytes| Output64[Total: 128+ bytes<br/>Encryption: 64<br/>Auth: 32<br/>Signature: variable]
+    
+    Output32 --> End([Keys Ready for Use])
+    Output64 --> End
 ```
 
 ---

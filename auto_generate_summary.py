@@ -142,10 +142,12 @@ class AutoMetricsExtractor:
         print("=" * 60)
         return True
     
-    def generate_markdown_summary(self):
+    def generate_markdown_summary(self, filename=None):
         """Generate comprehensive markdown summary"""
-        
-        md = "# ✅ Final Metrics Summary — BB84 Quantum Encryption System\n\n"
+        heading = "# ✅ Final Metrics Summary — BB84 Quantum Encryption System"
+        if filename:
+            heading += f" — {filename}"
+        md = heading + "\n\n"
         md += f"*Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}*\n\n"
         md += "This summary consolidates all encryption/decryption metrics from BB84 quantum key distribution tests.\n\n"
         md += "---\n\n"
@@ -297,36 +299,32 @@ class AutoMetricsExtractor:
         
         return md
     
-    def save_summary_pdf(self, content):
+    def save_summary_pdf(self, content, filename=None):
         """Save summary as PDF with proper formatted tables"""
         try:
             from fpdf import FPDF
-            
             class PDF(FPDF):
                 def create_table(self, headers, data, col_widths):
-                    """Create a properly formatted table with borders"""
-                    # Header
                     self.set_font('Arial', 'B', 10)
                     self.set_fill_color(200, 220, 255)
                     for i, header in enumerate(headers):
                         self.cell(col_widths[i], 8, str(header), border=1, fill=True, align='C')
                     self.ln()
-                    
-                    # Data rows
                     self.set_font('Arial', '', 9)
                     for row in data:
                         for i, cell in enumerate(row):
                             self.cell(col_widths[i], 7, str(cell), border=1, align='L')
                         self.ln()
                     self.ln(3)
-            
             pdf = PDF()
             pdf.add_page()
             pdf.set_auto_page_break(auto=True, margin=15)
-            
             # Title
             pdf.set_font('Arial', 'B', 16)
-            pdf.cell(0, 10, 'Final Metrics Summary - BB84 Quantum Encryption System', ln=True, align='C')
+            title = 'Final Metrics Summary '
+            if filename:
+                title += f' - {filename}'
+            pdf.cell(0, 10, title, ln=True, align='C')
             pdf.ln(5)
             
             pdf.set_font('Arial', 'I', 10)
@@ -496,7 +494,7 @@ def main():
     print("\n" + "=" * 60 + "\n")
     
     # Default path - change this to your PDF reports folder
-    default_path = r"C:\Users\Qadri laptop\Downloads\New folder (2)\BB84-Quantum-Encryption-Tool-Simulator\testing\pdf_one page"
+    default_path = r"C:\Users\Qadri laptop\Downloads\New folder (2)\BB84-Quantum-Encryption-Tool-Simulator\testing\Video"
     # Get results folder path
     results_folder = input(f"Enter PDF folder path (press Enter for default):\n[{default_path}]\n> ").strip().strip('"')
     if not results_folder:
@@ -514,10 +512,11 @@ def main():
     print("\n🔄 Generating PDF summary...")
     
     # Generate markdown summary
-    summary = extractor.generate_markdown_summary()
-    
+    # Use the folder name as the filename context for the heading
+    folder_name = os.path.basename(os.path.normpath(results_folder))
+    summary = extractor.generate_markdown_summary(filename=folder_name)
     # Save as PDF in the same folder
-    output_path = extractor.save_summary_pdf(summary)
+    output_path = extractor.save_summary_pdf(summary, filename=folder_name)
     
     if output_path:
         print("\n" + "=" * 60)

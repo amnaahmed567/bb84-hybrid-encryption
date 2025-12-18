@@ -69,9 +69,9 @@ class BB84App:
         self.cipher_choice = ttk.Combobox(
             self.cipher_frame,
             values=[
-                "AES-GCM (Best for Desktop/Server with AES-NI)",
-                "ChaCha20 (Best for Mobile/ARM/Embedded)",
-                "AES-SIV (Misuse-resistant, No nonce required)"
+                "AES-GCM",
+                "ChaCha20",
+                "AES-SIV "
             ],
             state="readonly",
             width=55

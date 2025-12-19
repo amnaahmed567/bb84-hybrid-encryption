@@ -137,17 +137,6 @@ The test results demonstrate:
 - Multi-layer integrity checking
 - Handling of wrong keys, corrupted metadata, and AEAD failures
 
----
-
-## Recommendations & Future Work
-
-- Use **AES-SIV** for high-security or archival files (misuse-resistant, deterministic).
-- Use **ChaCha20-Poly1305** for mobile/ARM platforms for better software performance.
-- Add automated **unit tests** for all packagers (encrypt→decrypt roundtrips).
-- Improve GUI: theme toggle, better drag/drop UX, and clearer error reporting.
-- Move theme tokens and UI constants to a dedicated `theme` module for easier maintenance.
-
----
 
 ## License
 
